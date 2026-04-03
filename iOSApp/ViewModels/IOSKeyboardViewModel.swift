@@ -49,6 +49,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     private let client = IOSWebSocketClient()
     private let h264Decoder = H264FrameDecoder()
     private var cancellables: Set<AnyCancellable> = []
+    private var previewZoomLevel: Double = 1.0
 
     private let trustedSessionKey = "remoteKeyboard.trustedSession"
     private var hasTrustedSession: Bool {
@@ -97,7 +98,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                 case .paired:
                     self.connectionLabel = "Paired and ready"
                     self.hasTrustedSession = true
-                    self.client.sendStreamConfig(qualityMode: self.previewQualityMode)
+                    self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
                 case let .failed(reason):
                     self.connectionLabel = "Failed"
                     self.lastError = reason
@@ -242,7 +243,14 @@ final class IOSKeyboardViewModel: ObservableObject {
     func setPreviewQualityMode(_ mode: PreviewQualityMode) {
         guard previewQualityMode != mode else { return }
         previewQualityMode = mode
-        client.sendStreamConfig(qualityMode: mode)
+        client.sendStreamConfig(qualityMode: mode, previewZoomLevel: previewZoomLevel)
+    }
+
+    func setPreviewZoomLevel(_ zoomLevel: Double) {
+        let clamped = min(3.0, max(1.0, zoomLevel))
+        guard abs(previewZoomLevel - clamped) > 0.01 else { return }
+        previewZoomLevel = clamped
+        client.sendStreamConfig(qualityMode: previewQualityMode, previewZoomLevel: previewZoomLevel)
     }
 
     func forgetTrustedSessionOnPhone() {

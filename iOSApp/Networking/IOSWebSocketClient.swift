@@ -98,8 +98,8 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(RemoteMessage.mouseScroll(scrollX: scrollX, scrollY: scrollY, token: pairedToken))
     }
 
-    func sendStreamConfig(qualityMode: PreviewQualityMode) {
-        sendMessage(RemoteMessage.streamConfig(qualityMode: qualityMode, token: pairedToken))
+    func sendStreamConfig(qualityMode: PreviewQualityMode, previewZoomLevel: Double?) {
+        sendMessage(RemoteMessage.streamConfig(qualityMode: qualityMode, previewZoomLevel: previewZoomLevel, token: pairedToken))
     }
 
     func sendForgetCurrentDeviceTrust() {

@@ -35,6 +35,14 @@ final class H264FrameEncoder: @unchecked Sendable {
             maxBitrate: 35_000_000,
             keyframeInterval: 30
         )
+
+        static let ultraZoom = QualityProfile(
+            profileLevel: kVTProfileLevel_H264_High_AutoLevel,
+            bitsPerPixel: 0.30,
+            minBitrate: 18_000_000,
+            maxBitrate: 55_000_000,
+            keyframeInterval: 30
+        )
     }
 
     static let configMarker: UInt8 = 0x10

@@ -37,6 +37,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var consecutiveFrameFailures = 0
     private var userSelectedQualityMode: PreviewQualityMode = .ultra
     private var effectiveQualityMode: PreviewQualityMode = .ultra
+    private var requestedPreviewZoomLevel: Double = 1.0
     private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     private var isThermalOverrideActive = false
     private var previewCaptureMaxWidth: CGFloat = 1920
@@ -337,6 +338,9 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         guard let mode = message.qualityMode else { return }
         userSelectedQualityMode = mode
+        if let zoomLevel = message.previewZoomLevel {
+            requestedPreviewZoomLevel = min(max(zoomLevel, 1.0), 3.0)
+        }
         applyEffectiveQualityMode()
     }
 
@@ -543,11 +547,23 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         switch nextMode {
         case .balanced:
-            previewCaptureMaxWidth = 1440
+            if requestedPreviewZoomLevel >= 2.5 {
+                previewCaptureMaxWidth = 1680
+            } else {
+                previewCaptureMaxWidth = 1440
+            }
             h264Encoder.setQualityProfile(.balanced)
         case .ultra:
-            previewCaptureMaxWidth = 1920
-            h264Encoder.setQualityProfile(.ultra)
+            if requestedPreviewZoomLevel >= 2.5 {
+                previewCaptureMaxWidth = 2560
+                h264Encoder.setQualityProfile(.ultraZoom)
+            } else if requestedPreviewZoomLevel >= 1.5 {
+                previewCaptureMaxWidth = 2240
+                h264Encoder.setQualityProfile(.ultra)
+            } else {
+                previewCaptureMaxWidth = 1920
+                h264Encoder.setQualityProfile(.ultra)
+            }
         }
     }
 

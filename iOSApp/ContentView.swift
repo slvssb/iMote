@@ -25,25 +25,34 @@ private struct FixedScreenPreview: View {
     @ObservedObject var preview: ScreenPreviewState
     let zoomScale: CGFloat
     let isAutoFollowEnabled: Bool
+    let isVirtualOverscanEnabled: Bool
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Rectangle()
-                .fill(.black.opacity(0.8))
+        GeometryReader { proxy in
+            let safeZoom = max(zoomScale, 1)
+            let overscanX = (isAutoFollowEnabled && isVirtualOverscanEnabled) ? proxy.size.width / (4 * safeZoom) : 0
+            let overscanY = (isAutoFollowEnabled && isVirtualOverscanEnabled) ? proxy.size.height / (4 * safeZoom) : 0
 
-            SampleBufferPreviewView(bridge: preview.displayBridge)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .scaleEffect(
-                    isAutoFollowEnabled ? zoomScale : 1,
-                    anchor: isAutoFollowEnabled ? preview.followAnchor : .center
-                )
-                .clipped()
+            ZStack(alignment: .bottomLeading) {
+                Rectangle()
+                    .fill(.black.opacity(0.8))
 
-            if preview.hasFrame == false {
-                Color.black.opacity(0.9)
+                SampleBufferPreviewView(bridge: preview.displayBridge)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+                    // Virtual overscan lets edge content move closer to center at high zoom.
+                    .padding(.horizontal, overscanX)
+                    .padding(.vertical, overscanY)
+                    .scaleEffect(
+                        isAutoFollowEnabled ? zoomScale : 1,
+                        anchor: isAutoFollowEnabled ? preview.followAnchor : .center
+                    )
+                    .clipped()
 
+                if preview.hasFrame == false {
+                    Color.black.opacity(0.9)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(preview.sourceAspectRatio, contentMode: .fit)
@@ -79,17 +88,32 @@ private final class SampleBufferDisplayLayerView: UIView {
 
 private struct PreviewStatsStripView: View {
     @ObservedObject var preview: ScreenPreviewState
+    let onSettingsTapped: () -> Void
 
     var body: some View {
-        HStack {
-            Spacer(minLength: 0)
-            Text(preview.statsLabel)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-            Spacer(minLength: 0)
+        ZStack {
+            HStack {
+                Spacer(minLength: 0)
+                Text(preview.statsLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                Spacer(minLength: 0)
+            }
+
+            HStack {
+                Spacer(minLength: 0)
+                Button(action: onSettingsTapped) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.headline.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 12)
+            }
         }
     }
 }
@@ -103,8 +127,10 @@ private struct PreviewStatsStripView: View {
     @ObservedObject var viewModel: IOSKeyboardViewModel
     @AppStorage("preview.zoom.level") private var previewZoomLevel: Double = 2.5
     @AppStorage("preview.quality.mode") private var previewQualityModeRaw: String = PreviewQualityMode.ultra.rawValue
+    @AppStorage("preview.virtual.overscan.enabled") private var isVirtualOverscanEnabled = false
     @State private var isTypingCaptureActive = false
     @State private var isZoomSliderEditing = false
+    @State private var isConfigSheetPresented = false
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -118,22 +144,31 @@ private struct PreviewStatsStripView: View {
 
             VStack(spacing: 0) {
                 if viewModel.isConnected {
-                    fixedScreenPreview
+                    GeometryReader { geometry in
+                        let previewAspect = max(viewModel.screenPreview.sourceAspectRatio, 0.01)
+                        let previewHeight = geometry.size.width / previewAspect
 
-                    previewStatsStrip
-                        .padding(.top, 10)
-                        .padding(.bottom, 10)
+                        VStack(spacing: 0) {
+                            fixedScreenPreview
+                                .frame(height: previewHeight)
 
-                    VStack(spacing: Layout.sectionSpacing) {
-                        previewControlsPanel
-                        inputPanel
-                        mousePanel
-                            .frame(minHeight: Layout.touchpadHeight)
+                            previewStatsStrip
+                                .padding(.top, 10)
+                                .padding(.bottom, 10)
+
+                            VStack(spacing: Layout.sectionSpacing) {
+                                inputPanel
+                                mousePanel
+                                    .frame(minHeight: Layout.touchpadHeight)
+                                    .frame(maxHeight: .infinity)
+                            }
+                            .frame(maxWidth: Layout.contentMaxWidth, maxHeight: .infinity, alignment: .top)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .padding(.horizontal, Layout.contentPadding)
+                            .padding(.bottom, Layout.verticalPadding)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
-                    .frame(maxWidth: Layout.contentMaxWidth, alignment: .top)
-                    .frame(maxWidth: .infinity, alignment: .top)
-                    .padding(.horizontal, Layout.contentPadding)
-                    .padding(.bottom, Layout.verticalPadding)
                 } else {
                     VStack(spacing: Layout.sectionSpacing) {
                         connectionPanel
@@ -148,9 +183,26 @@ private struct PreviewStatsStripView: View {
         }
         .onAppear {
             previewZoomLevel = clampedZoom(previewZoomLevel)
+            viewModel.setPreviewZoomLevel(previewZoomLevel)
             if let storedQuality = PreviewQualityMode(rawValue: previewQualityModeRaw) {
                 viewModel.setPreviewQualityMode(storedQuality)
             }
+        }
+        .onChange(of: previewZoomLevel) { _, newValue in
+            viewModel.setPreviewZoomLevel(newValue)
+        }
+        .sheet(isPresented: $isConfigSheetPresented) {
+            NavigationStack {
+                ScrollView {
+                    VStack(spacing: Layout.sectionSpacing) {
+                        previewControlsPanel
+                    }
+                    .padding(Layout.contentPadding)
+                }
+                .navigationTitle("App Settings")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+            .presentationDetents([.medium, .large])
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
     }
@@ -279,7 +331,8 @@ private struct PreviewStatsStripView: View {
         FixedScreenPreview(
             preview: viewModel.screenPreview,
             zoomScale: CGFloat(previewZoomLevel),
-            isAutoFollowEnabled: previewZoomLevel > 1.0
+            isAutoFollowEnabled: previewZoomLevel > 1.0,
+            isVirtualOverscanEnabled: isVirtualOverscanEnabled
         )
         .simultaneousGesture(
             TapGesture().onEnded {
@@ -290,18 +343,16 @@ private struct PreviewStatsStripView: View {
     }
 
     private var previewStatsStrip: some View {
-        PreviewStatsStripView(preview: viewModel.screenPreview)
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    focusedField = nil
-                    dismissTypingCapture()
-                }
-            )
+        PreviewStatsStripView(preview: viewModel.screenPreview) {
+            focusedField = nil
+            dismissTypingCapture()
+            isConfigSheetPresented = true
+        }
     }
 
     private var previewControlsPanel: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     Text("Zoom level")
                         .font(.footnote.weight(.semibold))
@@ -334,8 +385,11 @@ private struct PreviewStatsStripView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Layout.fieldHorizontalPadding)
+            .padding(.vertical, Layout.fieldVerticalPadding)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Preview quality")
                     .font(.footnote.weight(.semibold))
 
@@ -353,7 +407,22 @@ private struct PreviewStatsStripView: View {
                 .pickerStyle(.segmented)
                 .disabled(viewModel.isThermalQualityOverrideActive)
             }
-            .frame(maxWidth: 210, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Layout.fieldHorizontalPadding)
+            .padding(.vertical, Layout.fieldVerticalPadding)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+
+            HStack(spacing: 12) {
+                Text("Virtual overscan")
+                    .font(.footnote.weight(.semibold))
+                Spacer(minLength: 0)
+                Toggle("", isOn: $isVirtualOverscanEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .padding(.horizontal, Layout.fieldHorizontalPadding)
+            .padding(.vertical, Layout.fieldVerticalPadding)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .simultaneousGesture(

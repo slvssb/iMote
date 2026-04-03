@@ -66,6 +66,7 @@ public struct RemoteMessage: Codable, Sendable {
     public var cursorY: Double?
     public var button: MouseButton?
     public var qualityMode: PreviewQualityMode?
+    public var previewZoomLevel: Double?
     public var trustAction: TrustControlAction?
     public var thermalOverrideActive: Bool?
     public var frameBase64: String?
@@ -90,6 +91,7 @@ public struct RemoteMessage: Codable, Sendable {
         cursorY: Double? = nil,
         button: MouseButton? = nil,
         qualityMode: PreviewQualityMode? = nil,
+        previewZoomLevel: Double? = nil,
         trustAction: TrustControlAction? = nil,
         thermalOverrideActive: Bool? = nil,
         frameBase64: String? = nil
@@ -113,6 +115,7 @@ public struct RemoteMessage: Codable, Sendable {
         self.cursorY = cursorY
         self.button = button
         self.qualityMode = qualityMode
+        self.previewZoomLevel = previewZoomLevel
         self.trustAction = trustAction
         self.thermalOverrideActive = thermalOverrideActive
         self.frameBase64 = frameBase64
@@ -155,8 +158,8 @@ public struct RemoteMessage: Codable, Sendable {
         RemoteMessage(type: .cursorPosition, cursorX: x, cursorY: y)
     }
 
-    public static func streamConfig(qualityMode: PreviewQualityMode, token: String?) -> RemoteMessage {
-        RemoteMessage(type: .streamConfig, token: token, qualityMode: qualityMode)
+    public static func streamConfig(qualityMode: PreviewQualityMode, previewZoomLevel: Double?, token: String?) -> RemoteMessage {
+        RemoteMessage(type: .streamConfig, token: token, qualityMode: qualityMode, previewZoomLevel: previewZoomLevel)
     }
 
     public static func trustControl(action: TrustControlAction, token: String?, deviceID: String?) -> RemoteMessage {
