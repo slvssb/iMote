@@ -7,6 +7,12 @@ This workspace contains two SwiftUI targets:
 
 It uses local-network WebSockets, Bonjour discovery, pairing code authentication, and trusted-device sessions.
 
+## Project Policies
+
+- License: [LICENSE](LICENSE)
+- Privacy Policy: [PRIVACY.md](PRIVACY.md)
+- Terms of Use: [TERMS.md](TERMS.md)
+
 ## Threat Model (Current)
 
 This app is designed for personal devices on trusted networks.
