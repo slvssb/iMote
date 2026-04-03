@@ -19,6 +19,8 @@ struct ContentView: View {
         static let touchpadHeight: CGFloat = 210
         static let mouseMotionMultiplier: Double = 1.45
         static let scrollMultiplier: Double = 1.2
+        static let previewCornerRadius: CGFloat = 10
+        static let previewTopGlowHeight: CGFloat = 160
     }
 
 private struct FixedScreenPreview: View {
@@ -120,6 +122,33 @@ private struct PreviewStatsStripView: View {
     }
 }
 
+private struct MacStartupOverlay: View {
+    let progress: Double
+
+    var body: some View {
+        ZStack {
+            Color.black
+
+            VStack(spacing: 20) {
+                Image(systemName: "applelogo")
+                    .font(.system(size: 38, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.95))
+
+                ZStack(alignment: .leading) {
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(0.16))
+                        .frame(width: 148, height: 4)
+
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(0.9))
+                        .frame(width: 148 * progress, height: 4)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
     private enum Field: Hashable {
         case pairingCode
     }
@@ -133,6 +162,10 @@ private struct PreviewStatsStripView: View {
     @State private var isTypingCaptureActive = false
     @State private var isZoomSliderEditing = false
     @State private var isConfigSheetPresented = false
+    @State private var isStartupOverlayVisible = false
+    @State private var startupProgress = 0.0
+    @State private var hasSatisfiedStartupMinimum = false
+    @State private var startupTask: Task<Void, Never>?
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -147,12 +180,44 @@ private struct PreviewStatsStripView: View {
             VStack(spacing: 0) {
                 if viewModel.isConnected {
                     GeometryReader { geometry in
+                        let topInset = geometry.safeAreaInsets.top
                         let previewAspect = max(viewModel.screenPreview.sourceAspectRatio, 0.01)
                         let previewHeight = geometry.size.width / previewAspect
 
                         VStack(spacing: 0) {
-                            fixedScreenPreview
-                                .frame(height: previewHeight)
+                            ZStack(alignment: .top) {
+                                previewTopGlow(topInset: topInset)
+
+                                fixedScreenPreview
+                                    .opacity(isStartupOverlayVisible ? 0 : 1)
+                                    .animation(.easeInOut(duration: 0.35), value: isStartupOverlayVisible)
+                                    .clipShape(
+                                        RoundedRectangle(
+                                            cornerRadius: Layout.previewCornerRadius,
+                                            style: .continuous
+                                        )
+                                    )
+                                    .overlay {
+                                        RoundedRectangle(
+                                            cornerRadius: Layout.previewCornerRadius,
+                                            style: .continuous
+                                        )
+                                        .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
+                                    }
+
+                                if isStartupOverlayVisible {
+                                    MacStartupOverlay(progress: startupProgress)
+                                        .clipShape(
+                                            RoundedRectangle(
+                                                cornerRadius: Layout.previewCornerRadius,
+                                                style: .continuous
+                                            )
+                                        )
+                                        .transition(.opacity)
+                                }
+                            }
+                            .frame(height: previewHeight + topInset)
+                            .padding(.top, -topInset)
 
                             previewStatsStrip
                                 .padding(.top, 10)
@@ -171,6 +236,7 @@ private struct PreviewStatsStripView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
+                    .ignoresSafeArea(edges: .top)
                 } else {
                     VStack(spacing: Layout.sectionSpacing) {
                         connectionPanel
@@ -189,9 +255,22 @@ private struct PreviewStatsStripView: View {
             if let storedQuality = PreviewQualityMode(rawValue: previewQualityModeRaw) {
                 viewModel.setPreviewQualityMode(storedQuality)
             }
+            if viewModel.isConnected {
+                beginStartupSequence()
+            }
         }
         .onChange(of: previewZoomLevel) { _, newValue in
             viewModel.setPreviewZoomLevel(newValue)
+        }
+        .onChange(of: viewModel.isConnected) { _, isConnected in
+            if isConnected {
+                beginStartupSequence()
+            } else {
+                resetStartupSequence()
+            }
+        }
+        .onChange(of: viewModel.screenPreview.hasFrame) { _, _ in
+            dismissStartupOverlayIfReady()
         }
         .sheet(isPresented: $isConfigSheetPresented) {
             NavigationStack {
@@ -356,6 +435,59 @@ private struct PreviewStatsStripView: View {
                 dismissTypingCapture()
             }
         )
+    }
+
+    private func previewTopGlow(topInset: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            LinearGradient(
+                colors: [
+                    viewModel.screenPreview.previewGlowColor.opacity(0.48),
+                    viewModel.screenPreview.previewGlowColor.opacity(0.24),
+                    .clear
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: Layout.previewTopGlowHeight + topInset)
+            .blur(radius: 28)
+
+            Spacer(minLength: 0)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func beginStartupSequence() {
+        startupTask?.cancel()
+        hasSatisfiedStartupMinimum = false
+        startupProgress = 0
+        withAnimation(.easeOut(duration: 0.12)) {
+            isStartupOverlayVisible = true
+        }
+        withAnimation(.linear(duration: 2.0)) {
+            startupProgress = 1
+        }
+
+        startupTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard Task.isCancelled == false else { return }
+            hasSatisfiedStartupMinimum = true
+            dismissStartupOverlayIfReady()
+        }
+    }
+
+    private func dismissStartupOverlayIfReady() {
+        guard hasSatisfiedStartupMinimum, viewModel.screenPreview.hasFrame else { return }
+        withAnimation(.easeInOut(duration: 0.35)) {
+            isStartupOverlayVisible = false
+        }
+    }
+
+    private func resetStartupSequence() {
+        startupTask?.cancel()
+        startupTask = nil
+        hasSatisfiedStartupMinimum = false
+        startupProgress = 0
+        isStartupOverlayVisible = false
     }
 
     private var previewStatsStrip: some View {

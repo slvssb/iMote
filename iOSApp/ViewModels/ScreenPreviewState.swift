@@ -1,5 +1,6 @@
 import Combine
 import AVFoundation
+import CoreImage
 import Foundation
 import SwiftUI
 import UIKit
@@ -10,6 +11,7 @@ final class ScreenPreviewState: ObservableObject {
     @Published private(set) var sourceAspectRatio: CGFloat = 16.0 / 10.0
     @Published var statsLabel = "No frames yet"
     @Published private(set) var followAnchor = UnitPoint.center
+    @Published private(set) var previewGlowColor = Color(red: 0.22, green: 0.28, blue: 0.36)
     let displayBridge = SampleBufferDisplayBridge()
 
     let zoomScale: CGFloat = 2.2
@@ -19,6 +21,11 @@ final class ScreenPreviewState: ObservableObject {
     private var displayedFPS: Int?
     private var smoothedDecodeLatencyMs: Double?
     private var timerCancellable: AnyCancellable?
+    private var glowSampleCounter = 0
+    private var smoothedGlowRGB: SIMD3<Double>?
+    private let ciContext = CIContext(options: [
+        .cacheIntermediates: false
+    ])
 
     init() {
         timerCancellable = Timer.publish(every: 1, on: .main, in: .common)
@@ -37,6 +44,9 @@ final class ScreenPreviewState: ObservableObject {
         smoothedFPS = nil
         displayedFPS = nil
         smoothedDecodeLatencyMs = nil
+        glowSampleCounter = 0
+        smoothedGlowRGB = nil
+        previewGlowColor = Color(red: 0.22, green: 0.28, blue: 0.36)
         displayBridge.flush()
     }
 
@@ -58,6 +68,7 @@ final class ScreenPreviewState: ObservableObject {
             if height > 0 {
                 sourceAspectRatio = width / height
             }
+            updatePreviewGlowColor(from: pixelBuffer)
         }
         hasFrame = true
         displayBridge.enqueue(sampleBuffer)
@@ -124,6 +135,59 @@ final class ScreenPreviewState: ObservableObject {
         let decodeMs = Int((smoothedDecodeLatencyMs ?? 0).rounded())
         statsLabel = "~\(fps) fps • decode \(decodeMs) ms • render \(ageMs) ms"
     }
+
+    private func updatePreviewGlowColor(from pixelBuffer: CVPixelBuffer) {
+        glowSampleCounter += 1
+        guard glowSampleCounter % 6 == 0 else { return }
+
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let extent = image.extent
+        guard extent.isEmpty == false else { return }
+
+        // Sample a centered region to avoid unstable colors from edge UI chrome.
+        let sampleRect = extent.insetBy(dx: extent.width * 0.22, dy: extent.height * 0.28)
+        let filterInputExtent = CIVector(cgRect: sampleRect)
+        guard
+            let filter = CIFilter(name: "CIAreaAverage", parameters: [
+                kCIInputImageKey: image,
+                kCIInputExtentKey: filterInputExtent
+            ]),
+            let outputImage = filter.outputImage
+        else {
+            return
+        }
+
+        var rgba = [UInt8](repeating: 0, count: 4)
+        ciContext.render(
+            outputImage,
+            toBitmap: &rgba,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+
+        let sampled = SIMD3<Double>(
+            Double(rgba[0]) / 255.0,
+            Double(rgba[1]) / 255.0,
+            Double(rgba[2]) / 255.0
+        )
+
+        let blendAlpha = 0.18
+        let blended: SIMD3<Double>
+        if let current = smoothedGlowRGB {
+            blended = current + (sampled - current) * blendAlpha
+        } else {
+            blended = sampled
+        }
+        smoothedGlowRGB = blended
+
+        previewGlowColor = Color(
+            red: min(max(blended.x, 0), 1),
+            green: min(max(blended.y, 0), 1),
+            blue: min(max(blended.z, 0), 1)
+        )
+    }
 }
 
 @MainActor
@@ -132,7 +196,8 @@ final class SampleBufferDisplayBridge {
 
     func attach(layer: AVSampleBufferDisplayLayer) {
         displayLayer = layer
-        layer.videoGravity = .resizeAspect
+        // Fill the available preview surface edge-to-edge.
+        layer.videoGravity = .resizeAspectFill
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
