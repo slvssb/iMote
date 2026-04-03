@@ -216,8 +216,8 @@ private struct MacStartupOverlay: View {
                                         .transition(.opacity)
                                 }
                             }
-                            .frame(height: previewHeight + topInset)
-                            .padding(.top, -topInset)
+                            .frame(height: previewHeight)
+                            .padding(.top, topInset)
 
                             previewStatsStrip
                                 .padding(.top, 10)
