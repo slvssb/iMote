@@ -80,46 +80,15 @@ private final class SampleBufferDisplayLayerView: UIView {
 private struct PreviewStatsStripView: View {
     @ObservedObject var preview: ScreenPreviewState
 
-    private var line1: String {
-        let parts = preview.statsLabel.split(separator: "•").map { $0.trimmingCharacters(in: .whitespaces) }
-        guard parts.isEmpty == false else { return preview.statsLabel }
-        var primaryParts: [String] = [parts[0]]
-        if let bitratePart = parts.first(where: { $0.localizedCaseInsensitiveContains("bitrate") }) {
-            primaryParts.append(bitratePart)
-        }
-        if let codecPart = parts.first(where: { $0.localizedCaseInsensitiveContains("codec") }) {
-            primaryParts.append(codecPart)
-        }
-        return primaryParts.joined(separator: " • ")
-    }
-
-    private var line2: String {
-        let parts = preview.statsLabel.split(separator: "•").map { $0.trimmingCharacters(in: .whitespaces) }
-        let detailParts = parts.filter { part in
-            part.localizedCaseInsensitiveContains("decode") || part.localizedCaseInsensitiveContains("render")
-        }
-        if detailParts.isEmpty {
-            return parts.dropFirst().joined(separator: " • ")
-        }
-        return detailParts.joined(separator: " • ")
-    }
-
     var body: some View {
         HStack {
             Spacer(minLength: 0)
-            VStack(spacing: 2) {
-                Text(line1)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.primary)
-                if line2.isEmpty == false {
-                    Text(line2)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+            Text(preview.statsLabel)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
             Spacer(minLength: 0)
         }
     }
@@ -134,7 +103,6 @@ private struct PreviewStatsStripView: View {
     @ObservedObject var viewModel: IOSKeyboardViewModel
     @AppStorage("preview.zoom.level") private var previewZoomLevel: Double = 2.5
     @AppStorage("preview.quality.mode") private var previewQualityModeRaw: String = PreviewQualityMode.ultra.rawValue
-    @AppStorage("preview.video.codec") private var previewVideoCodecRaw: String = PreviewVideoCodec.hevc.rawValue
     @State private var isTypingCaptureActive = false
     @State private var isZoomSliderEditing = false
     @FocusState private var focusedField: Field?
@@ -180,14 +148,10 @@ private struct PreviewStatsStripView: View {
         }
         .onAppear {
             previewZoomLevel = clampedZoom(previewZoomLevel)
-            if let storedCodec = PreviewVideoCodec(rawValue: previewVideoCodecRaw) {
-                viewModel.setPreviewCodec(storedCodec)
-            }
             if let storedQuality = PreviewQualityMode(rawValue: previewQualityModeRaw) {
                 viewModel.setPreviewQualityMode(storedQuality)
             }
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private var connectionPanel: some View {
@@ -365,25 +329,6 @@ private struct PreviewStatsStripView: View {
                 .pickerStyle(.segmented)
             }
             .frame(maxWidth: 210, alignment: .leading)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Codec")
-                    .font(.footnote.weight(.semibold))
-
-                Picker("Codec", selection: Binding(
-                    get: { viewModel.previewCodec },
-                    set: { newValue in
-                        dismissTypingCapture()
-                        previewVideoCodecRaw = newValue.rawValue
-                        viewModel.setPreviewCodec(newValue)
-                    }
-                )) {
-                    Text("HEVC").tag(PreviewVideoCodec.hevc)
-                    Text("H264").tag(PreviewVideoCodec.h264)
-                }
-                .pickerStyle(.segmented)
-            }
-            .frame(maxWidth: 170, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .simultaneousGesture(
