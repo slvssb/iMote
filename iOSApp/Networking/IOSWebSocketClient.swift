@@ -30,6 +30,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private var reconnectAttempts = 0
     private var shouldReconnect = false
     private let deviceIdentifier = UIDevice.current.identifierForVendor?.uuidString
+    private var activeConnectionGeneration: UInt64 = 0
 
     private enum BinaryPacketMarker {
         static let h264Config: UInt8 = 0x10
@@ -48,6 +49,9 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         disconnect(userInitiated: true)
         state = .connecting
         shouldReconnect = true
+        reconnectAttempts = 0
+        activeConnectionGeneration &+= 1
+        let generation = activeConnectionGeneration
         lastHost = host
         lastPort = port
         lastPairCode = pairingCode
@@ -60,13 +64,14 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         let wsTask = session.webSocketTask(with: url)
         task = wsTask
         wsTask.resume()
-        listen()
+        listen(on: wsTask, generation: generation)
         sendPairing(code: pairingCode)
     }
 
     func disconnect(userInitiated: Bool = true) {
         if userInitiated {
             shouldReconnect = false
+            activeConnectionGeneration &+= 1
         }
         stopPing()
         task?.cancel(with: .normalClosure, reason: nil)
@@ -128,15 +133,17 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         }
     }
 
-    private func listen() {
-        guard let task else { return }
+    private func listen(on task: URLSessionWebSocketTask, generation: UInt64) {
         task.receive { [weak self] result in
             guard let self else { return }
             Task { @MainActor in
+                guard generation == self.activeConnectionGeneration, task == self.task else {
+                    return
+                }
                 switch result {
                 case let .success(message):
                     self.handleIncoming(message)
-                    self.listen()
+                    self.listen(on: task, generation: generation)
                 case let .failure(error):
                     self.handleDisconnect(error: error)
                 }
@@ -290,6 +297,7 @@ extension IOSWebSocketClient: URLSessionWebSocketDelegate {
         reason: Data?
     ) {
         Task { @MainActor in
+            guard webSocketTask == self.task else { return }
             self.handleDisconnect(error: nil)
         }
     }

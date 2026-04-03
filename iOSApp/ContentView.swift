@@ -19,7 +19,7 @@ struct ContentView: View {
         static let touchpadHeight: CGFloat = 210
         static let mouseMotionMultiplier: Double = 1.45
         static let scrollMultiplier: Double = 1.2
-        static let previewCornerRadius: CGFloat = 10
+        static let previewCornerRadius: CGFloat = 18
         static let previewTopGlowHeight: CGFloat = 160
     }
 
@@ -124,6 +124,7 @@ private struct PreviewStatsStripView: View {
 
 private struct MacStartupOverlay: View {
     let progress: Double
+    var progressOpacity: Double = 1
 
     var body: some View {
         ZStack {
@@ -143,9 +144,24 @@ private struct MacStartupOverlay: View {
                         .fill(Color.white.opacity(0.9))
                         .frame(width: 148 * progress, height: 4)
                 }
+                .opacity(progressOpacity)
             }
         }
         .allowsHitTesting(false)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct MacCenteredLogoOverlay: View {
+    var body: some View {
+        ZStack {
+            Color.black
+            Image(systemName: "applelogo")
+                .font(.system(size: 38, weight: .regular))
+                .foregroundStyle(.white.opacity(0.95))
+        }
+        .allowsHitTesting(false)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -163,9 +179,25 @@ private struct MacStartupOverlay: View {
     @State private var isZoomSliderEditing = false
     @State private var isConfigSheetPresented = false
     @State private var isStartupOverlayVisible = false
+    @State private var isStartupProgressVisible = false
     @State private var startupProgress = 0.0
-    @State private var hasSatisfiedStartupMinimum = false
     @State private var startupTask: Task<Void, Never>?
+    @State private var revealTask: Task<Void, Never>?
+    @State private var disconnectTask: Task<Void, Never>?
+    @State private var isDisconnectPreviewOverlayVisible = false
+    @State private var disconnectPreviewOverlayOpacity = 0.0
+    @State private var isDisconnectTransitionActive = false
+    @State private var connectedScreenOpacity = 1.0
+    @State private var connectionScreenOpacity = 1.0
+    @State private var showConnectedLayout = false
+    @State private var isLivePreviewVisible = false
+    @State private var isControlledDisconnectFlow = false
+    @State private var shouldForgetOnControlledDisconnect = false
+    @State private var lockedDisconnectPreviewAspectRatio: CGFloat?
+    @State private var isPreviewSectionVisible = false
+    @State private var isStatsSectionVisible = false
+    @State private var isKeyboardSectionVisible = false
+    @State private var isTrackpadSectionVisible = false
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -178,63 +210,76 @@ private struct MacStartupOverlay: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                if viewModel.isConnected {
+                if showConnectedLayout || isDisconnectTransitionActive {
                     GeometryReader { geometry in
-                        let topInset = geometry.safeAreaInsets.top
-                        let previewAspect = max(viewModel.screenPreview.sourceAspectRatio, 0.01)
+                        let topInset = resolvedTopInset(geometrySafeAreaTop: geometry.safeAreaInsets.top)
+                        let previewAspectSource = lockedDisconnectPreviewAspectRatio ?? viewModel.screenPreview.sourceAspectRatio
+                        let previewAspect = max(previewAspectSource, 0.01)
                         let previewHeight = geometry.size.width / previewAspect
 
                         VStack(spacing: 0) {
-                            ZStack(alignment: .top) {
-                                previewTopGlow(topInset: topInset)
+                            Color.clear
+                                .frame(height: topInset)
+                                .opacity(isPreviewSectionVisible ? 1 : 0)
+                                .animation(.easeInOut(duration: 0.35), value: isPreviewSectionVisible)
+
+                            ZStack {
+                                if isLivePreviewVisible == false || isStartupOverlayVisible || isDisconnectPreviewOverlayVisible {
+                                    Color.black
+                                }
 
                                 fixedScreenPreview
-                                    .opacity(isStartupOverlayVisible ? 0 : 1)
-                                    .animation(.easeInOut(duration: 0.35), value: isStartupOverlayVisible)
-                                    .clipShape(
-                                        RoundedRectangle(
-                                            cornerRadius: Layout.previewCornerRadius,
-                                            style: .continuous
-                                        )
-                                    )
-                                    .overlay {
-                                        RoundedRectangle(
-                                            cornerRadius: Layout.previewCornerRadius,
-                                            style: .continuous
-                                        )
-                                        .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
-                                    }
+                                    .opacity(isLivePreviewVisible ? 1 : 0)
 
                                 if isStartupOverlayVisible {
-                                    MacStartupOverlay(progress: startupProgress)
-                                        .clipShape(
-                                            RoundedRectangle(
-                                                cornerRadius: Layout.previewCornerRadius,
-                                                style: .continuous
-                                            )
-                                        )
-                                        .transition(.opacity)
+                                    MacStartupOverlay(
+                                        progress: startupProgress,
+                                        progressOpacity: isStartupProgressVisible ? 1 : 0
+                                    )
+                                }
+
+                                if isDisconnectPreviewOverlayVisible {
+                                    MacCenteredLogoOverlay()
+                                        .opacity(disconnectPreviewOverlayOpacity)
                                 }
                             }
-                            .frame(height: previewHeight)
-                            .padding(.top, topInset)
+                                .opacity(isPreviewSectionVisible ? 1 : 0)
+                                .animation(.easeInOut(duration: 0.35), value: isPreviewSectionVisible)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .frame(height: previewHeight)
+                                .padding(.horizontal, 4)
+                                .allowsHitTesting(isPreviewSectionVisible)
 
                             previewStatsStrip
                                 .padding(.top, 10)
                                 .padding(.bottom, 10)
+                                .opacity(isStatsSectionVisible ? 1 : 0)
+                                .animation(.easeInOut(duration: 0.35), value: isStatsSectionVisible)
+                                .allowsHitTesting(isStatsSectionVisible)
 
-                            VStack(spacing: Layout.sectionSpacing) {
-                                inputPanel
-                                mousePanel
-                                    .frame(minHeight: Layout.touchpadHeight)
-                                    .frame(maxHeight: .infinity)
-                            }
-                            .frame(maxWidth: Layout.contentMaxWidth, maxHeight: .infinity, alignment: .top)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            inputPanel
+                                .frame(maxWidth: Layout.contentMaxWidth, alignment: .top)
+                                .frame(maxWidth: .infinity, alignment: .top)
+                                .opacity(isKeyboardSectionVisible ? 1 : 0)
+                                .animation(.easeInOut(duration: 0.35), value: isKeyboardSectionVisible)
+                                .allowsHitTesting(isKeyboardSectionVisible)
+                                .padding(.top, Layout.sectionSpacing)
+                                .padding(.horizontal, Layout.contentPadding)
+
+                            mousePanel
+                                .frame(minHeight: Layout.touchpadHeight)
+                                .frame(maxWidth: Layout.contentMaxWidth, maxHeight: .infinity, alignment: .top)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                .opacity(isTrackpadSectionVisible ? 1 : 0)
+                                .animation(.easeInOut(duration: 0.35), value: isTrackpadSectionVisible)
+                                .allowsHitTesting(isTrackpadSectionVisible)
+                                .padding(.top, Layout.sectionSpacing)
                             .padding(.horizontal, Layout.contentPadding)
                             .padding(.bottom, Layout.verticalPadding)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .opacity(isConnectedContentVisible ? connectedScreenOpacity : 0)
+                        .allowsHitTesting(isConnectedContentVisible && connectedScreenOpacity > 0.01)
                     }
                     .ignoresSafeArea(edges: .top)
                 } else {
@@ -245,6 +290,7 @@ private struct MacStartupOverlay: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding(.horizontal, Layout.contentPadding)
                     .padding(.vertical, Layout.verticalPadding)
+                    .opacity(connectionScreenOpacity)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -255,18 +301,26 @@ private struct MacStartupOverlay: View {
             if let storedQuality = PreviewQualityMode(rawValue: previewQualityModeRaw) {
                 viewModel.setPreviewQualityMode(storedQuality)
             }
-            if viewModel.isConnected {
-                beginStartupSequence()
+            if viewModel.isPaired {
+                beginConnectSequence()
             }
         }
         .onChange(of: previewZoomLevel) { _, newValue in
             viewModel.setPreviewZoomLevel(newValue)
         }
-        .onChange(of: viewModel.isConnected) { _, isConnected in
-            if isConnected {
-                beginStartupSequence()
+        .onChange(of: viewModel.isPaired) { wasPaired, isPaired in
+            if isPaired {
+                cancelDisconnectSequence()
+                beginConnectSequence()
             } else {
-                resetStartupSequence()
+                if isControlledDisconnectFlow {
+                    return
+                }
+                if wasPaired {
+                    beginDisconnectSequence()
+                } else {
+                    resetTransitionState()
+                }
             }
         }
         .sheet(isPresented: $isConfigSheetPresented) {
@@ -274,11 +328,18 @@ private struct MacStartupOverlay: View {
                 ScrollView {
                     VStack(spacing: Layout.sectionSpacing) {
                         previewControlsPanel
-                        Button("Disconnect") {
-                            viewModel.disconnect()
+                        Button("Disconnect", role: .destructive) {
+                            beginControlledDisconnectSequence(forgetDevice: false)
                             isConfigSheetPresented = false
                         }
-                        .buttonStyle(LiquidGlassButtonStyle(tint: .gray))
+                        .buttonStyle(LiquidGlassButtonStyle(tint: .red))
+                        .frame(maxWidth: .infinity)
+
+                        Button("Forget and Disconnect", role: .destructive) {
+                            beginControlledDisconnectSequence(forgetDevice: true)
+                            isConfigSheetPresented = false
+                        }
+                        .buttonStyle(LiquidGlassButtonStyle(tint: .red))
                         .frame(maxWidth: .infinity)
                     }
                     .padding(Layout.contentPadding)
@@ -293,37 +354,27 @@ private struct MacStartupOverlay: View {
 
     private var connectionPanel: some View {
         VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 8, height: 8)
-                    Text("Disconnected")
-                        .font(.title2.weight(.bold))
+            VStack(alignment: .center, spacing: 16) {
+                if let appIcon = primaryAppIconImage {
+                    Image(uiImage: appIcon)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 72, height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                } else {
+                    Image(systemName: "iphone.gen3")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 72, height: 72)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-                Text("iMote: control your Mac from your iPhone")
+
+                Text("Control your Mac from your iPhone")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text("Choose your Mac host and enter the 6-digit pairing code.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
-
-            VStack(alignment: .leading, spacing: Layout.statusSpacing) {
-                Text(viewModel.connectionLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(viewModel.isDisconnected ? Color.secondary : Color.orange)
-
-                if let error = viewModel.lastError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
-            .padding(.horizontal, Layout.fieldHorizontalPadding)
-            .padding(.vertical, Layout.fieldVerticalPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .multilineTextAlignment(.center)
 
             VStack(alignment: .leading, spacing: Layout.groupSpacing) {
                 VStack(alignment: .leading, spacing: Layout.rowSpacing) {
@@ -379,12 +430,9 @@ private struct MacStartupOverlay: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal, Layout.fieldHorizontalPadding)
-                    .padding(.vertical, Layout.fieldVerticalPadding)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
                 }
             }
+            .padding(.top, 64)
 
             Button(connectButtonTitle) {
                 viewModel.connect()
@@ -393,30 +441,32 @@ private struct MacStartupOverlay: View {
             .frame(maxWidth: .infinity)
             .disabled(canConnect == false)
 
-            if canConnect == false {
+            if let error = viewModel.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if canConnect == false {
                 Text(connectDisabledReason)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            if viewModel.hasTrustedSessionLocally {
-                HStack(spacing: 12) {
-                    Text("Trusted session saved on iPhone")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Button("Forget") {
-                        viewModel.forgetTrustedSessionOnPhone()
-                    }
-                    .font(.footnote.weight(.semibold))
-                }
-                .padding(.horizontal, Layout.fieldHorizontalPadding)
-                .padding(.vertical, Layout.fieldVerticalPadding)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var primaryAppIconImage: UIImage? {
+        guard
+            let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+            let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+            let iconFiles = primary["CFBundleIconFiles"] as? [String],
+            let iconName = iconFiles.last,
+            let image = UIImage(named: iconName)
+        else {
+            return nil
+        }
+        return image
     }
 
     private var fixedScreenPreview: some View {
@@ -434,61 +484,216 @@ private struct MacStartupOverlay: View {
         )
     }
 
-    private func previewTopGlow(topInset: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            LinearGradient(
-                colors: [
-                    viewModel.screenPreview.previewGlowColor.opacity(0.48),
-                    viewModel.screenPreview.previewGlowColor.opacity(0.24),
-                    .clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: Layout.previewTopGlowHeight + topInset)
-            .blur(radius: 28)
-
-            Spacer(minLength: 0)
-        }
-        .allowsHitTesting(false)
+    private var isConnectedContentVisible: Bool {
+        isPreviewSectionVisible || isStatsSectionVisible || isKeyboardSectionVisible || isTrackpadSectionVisible || isStartupOverlayVisible || isDisconnectPreviewOverlayVisible
     }
 
-    private func beginStartupSequence() {
+    private func beginConnectSequence() {
         startupTask?.cancel()
-        hasSatisfiedStartupMinimum = false
+        revealTask?.cancel()
+        disconnectTask?.cancel()
+        isControlledDisconnectFlow = false
+        shouldForgetOnControlledDisconnect = false
+        lockedDisconnectPreviewAspectRatio = nil
+        isDisconnectTransitionActive = false
+        showConnectedLayout = false
+        connectionScreenOpacity = 1
+        connectedScreenOpacity = 1
+        isDisconnectPreviewOverlayVisible = false
+        disconnectPreviewOverlayOpacity = 0
+        isStartupOverlayVisible = false
+        isStartupProgressVisible = false
         startupProgress = 0
-        withAnimation(.easeOut(duration: 0.12)) {
-            isStartupOverlayVisible = true
-        }
-        withAnimation(.linear(duration: 2.0)) {
-            startupProgress = 1
-        }
+        isLivePreviewVisible = false
+        isPreviewSectionVisible = false
+        isStatsSectionVisible = false
+        isKeyboardSectionVisible = false
+        isTrackpadSectionVisible = false
 
         startupTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation(.easeInOut(duration: 0.35)) {
+                connectionScreenOpacity = 0
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
             guard Task.isCancelled == false else { return }
-            hasSatisfiedStartupMinimum = true
+
+            showConnectedLayout = true
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isPreviewSectionVisible = true
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isStartupOverlayVisible = true
+                isStartupProgressVisible = false
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            isStartupProgressVisible = true
+            startupProgress = 0
+            withAnimation(.linear(duration: 2.0)) {
+                startupProgress = 1
+            }
+
+            let minimumEnd = ContinuousClock.now + .seconds(2)
             while viewModel.screenPreview.hasFrame == false {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 guard Task.isCancelled == false else { return }
             }
-            dismissStartupOverlayIfReady()
+            let now = ContinuousClock.now
+            if now < minimumEnd {
+                try? await Task.sleep(for: now.duration(to: minimumEnd))
+                guard Task.isCancelled == false else { return }
+            }
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isLivePreviewVisible = true
+                isStartupProgressVisible = false
+            }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isStartupOverlayVisible = false
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isStatsSectionVisible = true
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isKeyboardSectionVisible = true
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isTrackpadSectionVisible = true
+            }
         }
     }
 
-    private func dismissStartupOverlayIfReady() {
-        guard hasSatisfiedStartupMinimum, viewModel.screenPreview.hasFrame else { return }
-        withAnimation(.easeInOut(duration: 0.35)) {
-            isStartupOverlayVisible = false
-        }
-    }
-
-    private func resetStartupSequence() {
+    private func resetTransitionState() {
         startupTask?.cancel()
+        revealTask?.cancel()
+        disconnectTask?.cancel()
         startupTask = nil
-        hasSatisfiedStartupMinimum = false
+        revealTask = nil
+        disconnectTask = nil
+        isControlledDisconnectFlow = false
+        shouldForgetOnControlledDisconnect = false
+        lockedDisconnectPreviewAspectRatio = nil
+        showConnectedLayout = false
+        isDisconnectTransitionActive = false
+        connectionScreenOpacity = 1
+        connectedScreenOpacity = 1
+        isStartupProgressVisible = false
         startupProgress = 0
+        isLivePreviewVisible = false
+        isDisconnectPreviewOverlayVisible = false
+        disconnectPreviewOverlayOpacity = 0
         isStartupOverlayVisible = false
+        isPreviewSectionVisible = false
+        isStatsSectionVisible = false
+        isKeyboardSectionVisible = false
+        isTrackpadSectionVisible = false
+    }
+
+    private func beginControlledDisconnectSequence(forgetDevice: Bool) {
+        guard showConnectedLayout else { return }
+        isControlledDisconnectFlow = true
+        shouldForgetOnControlledDisconnect = forgetDevice
+        beginDisconnectSequence()
+    }
+
+    private func beginDisconnectSequence() {
+        startupTask?.cancel()
+        revealTask?.cancel()
+        disconnectTask?.cancel()
+        isDisconnectTransitionActive = true
+        showConnectedLayout = true
+        lockedDisconnectPreviewAspectRatio = max(viewModel.screenPreview.sourceAspectRatio, 0.01)
+        connectedScreenOpacity = 1
+        connectionScreenOpacity = 0
+        isStartupOverlayVisible = false
+        isStartupProgressVisible = false
+        isDisconnectPreviewOverlayVisible = false
+        disconnectPreviewOverlayOpacity = 0
+
+        disconnectTask = Task { @MainActor in
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isTrackpadSectionVisible = false
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isKeyboardSectionVisible = false
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isStatsSectionVisible = false
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                isLivePreviewVisible = false
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            isDisconnectPreviewOverlayVisible = true
+            withAnimation(.easeInOut(duration: 0.35)) {
+                disconnectPreviewOverlayOpacity = 1
+            }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard Task.isCancelled == false else { return }
+
+            if shouldForgetOnControlledDisconnect {
+                viewModel.forgetCurrentDeviceTrustOnMac()
+                shouldForgetOnControlledDisconnect = false
+            }
+            if isControlledDisconnectFlow {
+                viewModel.disconnect()
+            }
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                disconnectPreviewOverlayOpacity = 0
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else { return }
+
+            isDisconnectPreviewOverlayVisible = false
+            isDisconnectTransitionActive = false
+            showConnectedLayout = false
+            isControlledDisconnectFlow = false
+            lockedDisconnectPreviewAspectRatio = nil
+            connectedScreenOpacity = 0
+            connectionScreenOpacity = 0
+
+            withAnimation(.easeInOut(duration: 0.35)) {
+                connectionScreenOpacity = 1
+            }
+        }
+    }
+
+    private func cancelDisconnectSequence() {
+        disconnectTask?.cancel()
+        disconnectTask = nil
+        isDisconnectPreviewOverlayVisible = false
+        disconnectPreviewOverlayOpacity = 0
+        isDisconnectTransitionActive = false
+        isControlledDisconnectFlow = false
+        shouldForgetOnControlledDisconnect = false
+        lockedDisconnectPreviewAspectRatio = nil
+        connectedScreenOpacity = 1
+        connectionScreenOpacity = 0
     }
 
     private var previewStatsStrip: some View {
@@ -719,6 +924,15 @@ private struct MacStartupOverlay: View {
 
     private func clampedZoom(_ value: Double) -> Double {
         min(3.0, max(1.0, value))
+    }
+
+    private func resolvedTopInset(geometrySafeAreaTop: CGFloat) -> CGFloat {
+        let windowTopInset = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }?
+            .safeAreaInsets.top ?? 0
+        return max(geometrySafeAreaTop, windowTopInset)
     }
 
     private func dismissTypingCapture() {

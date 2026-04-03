@@ -57,6 +57,8 @@ final class IOSKeyboardViewModel: ObservableObject {
     private let h264Decoder = H264FrameDecoder()
     private var cancellables: Set<AnyCancellable> = []
     private var previewZoomLevel: Double = 1.0
+    private var isUserInitiatedDisconnecting = false
+    private var suppressExpectedDisconnectErrors = false
 
     private let trustedSessionKey = "remoteKeyboard.trustedSession"
     private var hasTrustedSession: Bool {
@@ -81,11 +83,6 @@ final class IOSKeyboardViewModel: ObservableObject {
                     }
                 }
 
-                if self.hasTrustedSession,
-                   self.isDisconnected,
-                   self.selectedService != nil {
-                    self.connect()
-                }
             }
             .store(in: &cancellables)
 
@@ -96,17 +93,33 @@ final class IOSKeyboardViewModel: ObservableObject {
                 switch state {
                 case .disconnected:
                     self.connectionLabel = "Disconnected"
+                    self.lastError = nil
+                    self.isUserInitiatedDisconnecting = false
                     self.isThermalQualityOverrideActive = false
                     self.screenPreview.reset()
                 case .connecting:
+                    self.isUserInitiatedDisconnecting = false
+                    self.suppressExpectedDisconnectErrors = false
                     self.connectionLabel = "Connecting…"
                 case .connected:
+                    self.isUserInitiatedDisconnecting = false
+                    self.suppressExpectedDisconnectErrors = false
                     self.connectionLabel = "Connected (awaiting pairing)"
                 case .paired:
+                    self.isUserInitiatedDisconnecting = false
+                    self.suppressExpectedDisconnectErrors = false
                     self.connectionLabel = "Paired and ready"
                     self.hasTrustedSession = true
                     self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
                 case let .failed(reason):
+                    let normalizedReason = reason.localizedLowercase
+                    if self.suppressExpectedDisconnectErrors,
+                       (normalizedReason.contains("socket is not connected") ||
+                        normalizedReason.contains("cancel")) {
+                        self.connectionLabel = "Disconnected"
+                        self.lastError = nil
+                        return
+                    }
                     self.connectionLabel = "Failed"
                     self.lastError = reason
                     self.isThermalQualityOverrideActive = false
@@ -134,7 +147,16 @@ final class IOSKeyboardViewModel: ObservableObject {
         }
 
         client.onRemoteError = { [weak self] reason in
-            self?.lastError = reason
+            guard let self else { return }
+            if self.suppressExpectedDisconnectErrors,
+               (reason.localizedCaseInsensitiveContains("socket is not connected") ||
+                reason.localizedCaseInsensitiveContains("cancel")) {
+                return
+            }
+            if case .disconnected = self.client.state {
+                return
+            }
+            self.lastError = reason
         }
 
         client.onH264Config = { [weak self] configData in
@@ -175,6 +197,8 @@ final class IOSKeyboardViewModel: ObservableObject {
             lastError = "No Mac host discovered. Keep the macOS app running on the same Wi-Fi."
             return
         }
+        isUserInitiatedDisconnecting = false
+        suppressExpectedDisconnectErrors = false
 
         let codeToUse: String
         if pairingCode.count == 6 {
@@ -191,6 +215,9 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     func disconnect() {
+        isUserInitiatedDisconnecting = true
+        suppressExpectedDisconnectErrors = true
+        lastError = nil
         client.disconnect()
     }
 

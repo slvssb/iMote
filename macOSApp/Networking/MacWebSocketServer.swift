@@ -192,11 +192,19 @@ final class MacWebSocketServer: @unchecked Sendable {
                 return
             }
 
-            if let data, data.isEmpty == false {
+            guard let data else {
+                // Peer closed cleanly; tear down this client context so reconnects are accepted cleanly.
+                self.disconnect(id: id)
+                return
+            }
+
+            if data.isEmpty == false {
                 self.handlePayload(data, from: id)
             }
 
-            self.receiveNext(for: id)
+            if self.clients[id] != nil {
+                self.receiveNext(for: id)
+            }
         }
     }
 
