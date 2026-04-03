@@ -10,6 +10,16 @@ private struct EncoderPixelBuffer: @unchecked Sendable {
 
 final class H264FrameEncoder: @unchecked Sendable {
     private static let targetFPS = 60
+
+    private enum VideoCodec {
+        case hevc
+        case h264
+    }
+
+    private enum ConfigCodecTag: UInt8 {
+        case h264 = 0x01
+        case hevc = 0x02
+    }
     private static let minAdaptiveScale = 0.45
     private static let maxAdaptiveScale = 1.0
 
@@ -37,8 +47,10 @@ final class H264FrameEncoder: @unchecked Sendable {
         )
     }
 
-    static let configMarker: UInt8 = 0x10
-    static let frameMarker: UInt8 = 0x11
+    static let h264ConfigMarker: UInt8 = 0x10
+    static let h264FrameMarker: UInt8 = 0x11
+    static let hevcConfigMarker: UInt8 = 0x12
+    static let hevcFrameMarker: UInt8 = 0x13
 
     var onPacket: ((Data) -> Void)?
 
@@ -49,6 +61,7 @@ final class H264FrameEncoder: @unchecked Sendable {
     private var didSendConfig = false
     private var qualityProfile: QualityProfile = .ultra
     private var adaptiveBitrateScale: Double = 1.0
+    private var currentCodec: VideoCodec = .hevc
 
     private let queue = DispatchQueue(label: "remote.keyboard.h264.encoder")
 
@@ -169,11 +182,14 @@ final class H264FrameEncoder: @unchecked Sendable {
             kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: true
         ]
 
-        let status = VTCompressionSessionCreate(
+        let preferredCodec: VideoCodec = .hevc
+        let preferredCodecType: CMVideoCodecType = preferredCodec == .hevc ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
+
+        var status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             width: width,
             height: height,
-            codecType: kCMVideoCodecType_H264,
+            codecType: preferredCodecType,
             encoderSpecification: encoderSpecification as CFDictionary,
             imageBufferAttributes: nil,
             compressedDataAllocator: nil,
@@ -182,6 +198,24 @@ final class H264FrameEncoder: @unchecked Sendable {
             compressionSessionOut: &session
         )
 
+        if status != noErr || session == nil {
+            status = VTCompressionSessionCreate(
+                allocator: kCFAllocatorDefault,
+                width: width,
+                height: height,
+                codecType: kCMVideoCodecType_H264,
+                encoderSpecification: encoderSpecification as CFDictionary,
+                imageBufferAttributes: nil,
+                compressedDataAllocator: nil,
+                outputCallback: compressionOutputCallback,
+                refcon: Unmanaged.passUnretained(self).toOpaque(),
+                compressionSessionOut: &session
+            )
+            currentCodec = .h264
+        } else {
+            currentCodec = preferredCodec
+        }
+
         guard status == noErr, let session else {
             return
         }
@@ -189,8 +223,12 @@ final class H264FrameEncoder: @unchecked Sendable {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowTemporalCompression, value: kCFBooleanTrue)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: qualityProfile.profileLevel)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
+        if currentCodec == .h264 {
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: qualityProfile.profileLevel)
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
+        } else {
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_HEVC_Main_AutoLevel)
+        }
 
         let targetFPS = Self.targetFPS
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: targetFPS as CFTypeRef)
@@ -295,12 +333,22 @@ final class H264FrameEncoder: @unchecked Sendable {
             return
         }
 
-        var packet = Data([Self.frameMarker])
+        let marker = currentCodec == .hevc ? Self.hevcFrameMarker : Self.h264FrameMarker
+        var packet = Data([marker])
         packet.append(Data(bytes: dataPointer, count: totalLength))
         onPacket?(packet)
     }
 
     private func emitConfigPacket(_ formatDescription: CMFormatDescription) {
+        switch currentCodec {
+        case .h264:
+            emitH264ConfigPacket(formatDescription)
+        case .hevc:
+            emitHEVCConfigPacket(formatDescription)
+        }
+    }
+
+    private func emitH264ConfigPacket(_ formatDescription: CMFormatDescription) {
         var spsPointer: UnsafePointer<UInt8>?
         var spsLength = 0
         var spsCount = 0
@@ -337,11 +385,80 @@ final class H264FrameEncoder: @unchecked Sendable {
             return
         }
 
-        var packet = Data([Self.configMarker])
-        packet.append(contentsOf: withUnsafeBytes(of: UInt16(spsLength).bigEndian, Array.init))
-        packet.append(Data(bytes: spsPointer, count: spsLength))
-        packet.append(contentsOf: withUnsafeBytes(of: UInt16(ppsLength).bigEndian, Array.init))
-        packet.append(Data(bytes: ppsPointer, count: ppsLength))
+        var payload = Data([ConfigCodecTag.h264.rawValue])
+        payload.append(contentsOf: withUnsafeBytes(of: UInt16(spsLength).bigEndian, Array.init))
+        payload.append(Data(bytes: spsPointer, count: spsLength))
+        payload.append(contentsOf: withUnsafeBytes(of: UInt16(ppsLength).bigEndian, Array.init))
+        payload.append(Data(bytes: ppsPointer, count: ppsLength))
+
+        var packet = Data([Self.h264ConfigMarker])
+        packet.append(payload)
+        onPacket?(packet)
+    }
+
+    private func emitHEVCConfigPacket(_ formatDescription: CMFormatDescription) {
+        var vpsPointer: UnsafePointer<UInt8>?
+        var vpsLength = 0
+        var vpsCount = 0
+        var spsPointer: UnsafePointer<UInt8>?
+        var spsLength = 0
+        var spsCount = 0
+        var ppsPointer: UnsafePointer<UInt8>?
+        var ppsLength = 0
+        var ppsCount = 0
+
+        let vpsStatus = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+            formatDescription,
+            parameterSetIndex: 0,
+            parameterSetPointerOut: &vpsPointer,
+            parameterSetSizeOut: &vpsLength,
+            parameterSetCountOut: &vpsCount,
+            nalUnitHeaderLengthOut: nil
+        )
+
+        let spsStatus = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+            formatDescription,
+            parameterSetIndex: 1,
+            parameterSetPointerOut: &spsPointer,
+            parameterSetSizeOut: &spsLength,
+            parameterSetCountOut: &spsCount,
+            nalUnitHeaderLengthOut: nil
+        )
+
+        let ppsStatus = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+            formatDescription,
+            parameterSetIndex: 2,
+            parameterSetPointerOut: &ppsPointer,
+            parameterSetSizeOut: &ppsLength,
+            parameterSetCountOut: &ppsCount,
+            nalUnitHeaderLengthOut: nil
+        )
+
+        guard vpsStatus == noErr,
+              spsStatus == noErr,
+              ppsStatus == noErr,
+              let vpsPointer,
+              let spsPointer,
+              let ppsPointer,
+              vpsCount > 0,
+              spsCount > 0,
+              ppsCount > 0,
+              vpsLength > 0,
+              spsLength > 0,
+              ppsLength > 0 else {
+            return
+        }
+
+        var payload = Data([ConfigCodecTag.hevc.rawValue])
+        payload.append(contentsOf: withUnsafeBytes(of: UInt16(vpsLength).bigEndian, Array.init))
+        payload.append(Data(bytes: vpsPointer, count: vpsLength))
+        payload.append(contentsOf: withUnsafeBytes(of: UInt16(spsLength).bigEndian, Array.init))
+        payload.append(Data(bytes: spsPointer, count: spsLength))
+        payload.append(contentsOf: withUnsafeBytes(of: UInt16(ppsLength).bigEndian, Array.init))
+        payload.append(Data(bytes: ppsPointer, count: ppsLength))
+
+        var packet = Data([Self.hevcConfigMarker])
+        packet.append(payload)
         onPacket?(packet)
     }
 }

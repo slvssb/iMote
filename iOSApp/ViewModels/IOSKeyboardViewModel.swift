@@ -139,6 +139,11 @@ final class IOSKeyboardViewModel: ObservableObject {
             guard let self else { return }
             self.screenPreview.updateCursorPosition(x: x, y: y)
         }
+
+        client.onVideoCodecChanged = { [weak self] codecLabel in
+            guard let self else { return }
+            self.screenPreview.updateVideoCodecLabel(codecLabel)
+        }
     }
 
     func start() {

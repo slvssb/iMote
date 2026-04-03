@@ -6,6 +6,11 @@ import VideoToolbox
 final class H264FrameDecoder {
     private static let targetFPS = 60
 
+    private enum ConfigCodecTag: UInt8 {
+        case h264 = 0x01
+        case hevc = 0x02
+    }
+
     var onSampleBuffer: ((CMSampleBuffer) -> Void)?
     var onDecodeLatency: ((Double) -> Void)?
 
@@ -16,41 +21,17 @@ final class H264FrameDecoder {
     private let decodeStateLock = NSLock()
 
     func configure(with configPayload: Data) {
-        guard let (sps, pps) = parseConfigPayload(configPayload) else {
+        guard configPayload.isEmpty == false else { return }
+
+        if let tagged = parseTaggedConfigPayload(configPayload),
+           let formatDescription = makeFormatDescription(for: tagged.codec, parameterSets: tagged.parameterSets) {
+            applyFormatDescription(formatDescription)
             return
         }
 
-        sps.withUnsafeBytes { spsBytes in
-            pps.withUnsafeBytes { ppsBytes in
-                guard let spsPointer = spsBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
-                      let ppsPointer = ppsBytes.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
-                    return
-                }
-
-                let parameterSetPointers: [UnsafePointer<UInt8>] = [spsPointer, ppsPointer]
-                let parameterSetSizes: [Int] = [sps.count, pps.count]
-
-                var formatDescriptionOut: CMFormatDescription?
-                let status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
-                    allocator: kCFAllocatorDefault,
-                    parameterSetCount: 2,
-                    parameterSetPointers: parameterSetPointers,
-                    parameterSetSizes: parameterSetSizes,
-                    nalUnitHeaderLength: 4,
-                    formatDescriptionOut: &formatDescriptionOut
-                )
-
-                guard status == noErr, let formatDescriptionOut else {
-                    return
-                }
-
-                self.formatDescription = formatDescriptionOut
-                self.recreateDecompressionSession(formatDescriptionOut)
-                self.frameIndex = 0
-                self.decodeStateLock.lock()
-                self.decodeStartByFrameIndex.removeAll()
-                self.decodeStateLock.unlock()
-            }
+        if let legacy = parseLegacyH264ConfigPayload(configPayload),
+           let formatDescription = makeFormatDescription(for: .h264, parameterSets: legacy) {
+            applyFormatDescription(formatDescription)
         }
     }
 
@@ -157,7 +138,33 @@ final class H264FrameDecoder {
         }
     }
 
-    private func parseConfigPayload(_ data: Data) -> (Data, Data)? {
+    private func parseTaggedConfigPayload(_ data: Data) -> (codec: ConfigCodecTag, parameterSets: [Data])? {
+        guard let codecTag = data.first.flatMap({ ConfigCodecTag(rawValue: $0) }) else {
+            return nil
+        }
+
+        let expectedSetCount: Int
+        switch codecTag {
+        case .h264:
+            expectedSetCount = 2
+        case .hevc:
+            expectedSetCount = 3
+        }
+
+        var offset = 1
+        var parameterSets: [Data] = []
+        for _ in 0..<expectedSetCount {
+            guard offset + 2 <= data.count else { return nil }
+            let length = Int(data.readUInt16(at: &offset))
+            guard length > 0, offset + length <= data.count else { return nil }
+            parameterSets.append(data.subdata(in: offset..<(offset + length)))
+            offset += length
+        }
+
+        return (codecTag, parameterSets)
+    }
+
+    private func parseLegacyH264ConfigPayload(_ data: Data) -> [Data]? {
         guard data.count >= 4 else { return nil }
 
         var offset = 0
@@ -171,7 +178,73 @@ final class H264FrameDecoder {
         guard ppsLength > 0, offset + ppsLength <= data.count else { return nil }
         let pps = data.subdata(in: offset..<(offset + ppsLength))
 
-        return (sps, pps)
+        return [sps, pps]
+    }
+
+    private func makeFormatDescription(for codec: ConfigCodecTag, parameterSets: [Data]) -> CMFormatDescription? {
+        var formatDescription: CMFormatDescription?
+
+        switch codec {
+        case .h264:
+            guard parameterSets.count >= 2 else { return nil }
+            return parameterSets[0].withUnsafeBytes { spsBytes in
+                parameterSets[1].withUnsafeBytes { ppsBytes in
+                    guard let spsPointer = spsBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                          let ppsPointer = ppsBytes.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                        return nil
+                    }
+
+                    let pointers: [UnsafePointer<UInt8>] = [spsPointer, ppsPointer]
+                    let sizes: [Int] = [parameterSets[0].count, parameterSets[1].count]
+
+                    let status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                        allocator: kCFAllocatorDefault,
+                        parameterSetCount: 2,
+                        parameterSetPointers: pointers,
+                        parameterSetSizes: sizes,
+                        nalUnitHeaderLength: 4,
+                        formatDescriptionOut: &formatDescription
+                    )
+                    return status == noErr ? formatDescription : nil
+                }
+            }
+        case .hevc:
+            guard parameterSets.count >= 3 else { return nil }
+            return parameterSets[0].withUnsafeBytes { vpsBytes in
+                parameterSets[1].withUnsafeBytes { spsBytes in
+                    parameterSets[2].withUnsafeBytes { ppsBytes in
+                        guard let vpsPointer = vpsBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                              let spsPointer = spsBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                              let ppsPointer = ppsBytes.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                            return nil
+                        }
+
+                        let pointers: [UnsafePointer<UInt8>] = [vpsPointer, spsPointer, ppsPointer]
+                        let sizes: [Int] = [parameterSets[0].count, parameterSets[1].count, parameterSets[2].count]
+
+                        let status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                            allocator: kCFAllocatorDefault,
+                            parameterSetCount: 3,
+                            parameterSetPointers: pointers,
+                            parameterSetSizes: sizes,
+                            nalUnitHeaderLength: 4,
+                            extensions: nil,
+                            formatDescriptionOut: &formatDescription
+                        )
+                        return status == noErr ? formatDescription : nil
+                    }
+                }
+            }
+        }
+    }
+
+    private func applyFormatDescription(_ formatDescription: CMFormatDescription) {
+        self.formatDescription = formatDescription
+        recreateDecompressionSession(formatDescription)
+        frameIndex = 0
+        decodeStateLock.lock()
+        decodeStartByFrameIndex.removeAll()
+        decodeStateLock.unlock()
     }
 
     fileprivate func emitSampleBuffer(_ sampleBuffer: CMSampleBuffer, frameIndex: Int64?) {

@@ -19,6 +19,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onCursorPosition: ((Double, Double) -> Void)?
     var onH264Config: ((Data) -> Void)?
     var onH264Frame: ((Data) -> Void)?
+    var onVideoCodecChanged: ((String) -> Void)?
 
     private var session: URLSession!
     private var task: URLSessionWebSocketTask?
@@ -28,11 +29,14 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private var lastPairCode: String?
     private var reconnectAttempts = 0
     private var shouldReconnect = false
+    private var lastVideoCodecLabel: String?
     private let deviceIdentifier = UIDevice.current.identifierForVendor?.uuidString
 
     private enum BinaryPacketMarker {
         static let h264Config: UInt8 = 0x10
         static let h264Frame: UInt8 = 0x11
+        static let hevcConfig: UInt8 = 0x12
+        static let hevcFrame: UInt8 = 0x13
     }
 
     override init() {
@@ -71,6 +75,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
         pairedToken = nil
+        lastVideoCodecLabel = nil
         if userInitiated {
             state = .disconnected
         }
@@ -201,14 +206,30 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
 
         switch marker {
         case BinaryPacketMarker.h264Config:
+            publishVideoCodecIfNeeded("H264")
             onH264Config?(Data(payload))
             return true
         case BinaryPacketMarker.h264Frame:
+            publishVideoCodecIfNeeded("H264")
+            onH264Frame?(Data(payload))
+            return true
+        case BinaryPacketMarker.hevcConfig:
+            publishVideoCodecIfNeeded("HEVC")
+            onH264Config?(Data(payload))
+            return true
+        case BinaryPacketMarker.hevcFrame:
+            publishVideoCodecIfNeeded("HEVC")
             onH264Frame?(Data(payload))
             return true
         default:
             return false
         }
+    }
+
+    private func publishVideoCodecIfNeeded(_ label: String) {
+        guard lastVideoCodecLabel != label else { return }
+        lastVideoCodecLabel = label
+        onVideoCodecChanged?(label)
     }
 
     private func isLikelyJPEG(_ data: Data) -> Bool {
