@@ -39,6 +39,9 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
     var isNaturalScrollingEnabled = true
 
     private var isThreeFingerDragging = false
+    private let leftClickFeedback = UIImpactFeedbackGenerator(style: .soft)
+    private let rightClickFeedback = UIImpactFeedbackGenerator(style: .medium)
+    private let centerClickFeedback = UIImpactFeedbackGenerator(style: .rigid)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -56,6 +59,7 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         layer.borderWidth = 0.8
         clipsToBounds = true
         refreshTheme()
+        prepareHaptics()
 
         let oneFingerPan = UIPanGestureRecognizer(target: self, action: #selector(handleOneFingerPan(_:)))
         oneFingerPan.minimumNumberOfTouches = 1
@@ -128,6 +132,7 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         switch recognizer.state {
         case .began:
             isThreeFingerDragging = true
+            triggerClickHaptic(for: .left)
             onClick?(.left, .down)
         case .changed:
             let translation = recognizer.translation(in: self)
@@ -140,6 +145,7 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
             }
         case .ended, .cancelled, .failed:
             if isThreeFingerDragging {
+                triggerClickHaptic(for: .left)
                 onClick?(.left, .up)
                 isThreeFingerDragging = false
             }
@@ -150,19 +156,42 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended {
+            triggerClickHaptic(for: .left)
             onClick?(.left, .tap)
         }
     }
 
     @objc private func handleTwoFingerTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended {
+            triggerClickHaptic(for: .right)
             onClick?(.right, .tap)
         }
     }
 
     @objc private func handleThreeFingerTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended {
+            triggerClickHaptic(for: .center)
             onClick?(.center, .tap)
+        }
+    }
+
+    private func prepareHaptics() {
+        leftClickFeedback.prepare()
+        rightClickFeedback.prepare()
+        centerClickFeedback.prepare()
+    }
+
+    private func triggerClickHaptic(for button: MouseButton) {
+        switch button {
+        case .left:
+            leftClickFeedback.impactOccurred(intensity: 0.55)
+            leftClickFeedback.prepare()
+        case .right:
+            rightClickFeedback.impactOccurred(intensity: 0.75)
+            rightClickFeedback.prepare()
+        case .center:
+            centerClickFeedback.impactOccurred(intensity: 0.9)
+            centerClickFeedback.prepare()
         }
     }
 
