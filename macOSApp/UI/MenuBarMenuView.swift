@@ -14,6 +14,8 @@ struct MenuBarMenuView: View {
             Divider()
             connectionSection
             Divider()
+            trustedDevicesSection
+            Divider()
             controls
         }
         .padding(14)
@@ -73,6 +75,19 @@ struct MenuBarMenuView: View {
                     Text("• \(name)")
                         .font(.caption)
                 }
+            }
+        }
+    }
+
+    private var trustedDevicesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Trusted Devices")
+                .font(.subheadline.weight(.semibold))
+            Text("\(appState.trustedDevicesCount) trusted")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Clear trusted devices") {
+                appState.clearTrustedDevices()
             }
         }
     }
