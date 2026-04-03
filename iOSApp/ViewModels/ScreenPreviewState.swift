@@ -116,13 +116,26 @@ final class SampleBufferDisplayBridge {
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
         guard let layer = displayLayer else { return }
-        if layer.status == .failed {
-            layer.flushAndRemoveImage()
+        if #available(iOS 18.0, *) {
+            let renderer = layer.sampleBufferRenderer
+            if renderer.status == .failed {
+                renderer.flush(removingDisplayedImage: true, completionHandler: nil)
+            }
+            renderer.enqueue(sampleBuffer)
+        } else {
+            if layer.status == .failed {
+                layer.flushAndRemoveImage()
+            }
+            layer.enqueue(sampleBuffer)
         }
-        layer.enqueue(sampleBuffer)
     }
 
     func flush() {
-        displayLayer?.flushAndRemoveImage()
+        guard let layer = displayLayer else { return }
+        if #available(iOS 18.0, *) {
+            layer.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+        } else {
+            layer.flushAndRemoveImage()
+        }
     }
 }
