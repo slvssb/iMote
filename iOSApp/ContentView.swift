@@ -46,7 +46,7 @@ private struct FixedScreenPreview: View {
 
         }
         .frame(maxWidth: .infinity)
-        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .aspectRatio(preview.sourceAspectRatio, contentMode: .fit)
     }
 }
 
@@ -158,7 +158,7 @@ private struct PreviewStatsStripView: View {
                 )
 
                 VStack(alignment: .leading, spacing: Layout.groupSpacing) {
-                    if viewModel.isDisconnected {
+                    if viewModel.isDisconnected && viewModel.isTrustedAutoReconnect == false {
                         VStack(alignment: .leading, spacing: Layout.rowSpacing) {
                             Text("Mac Host")
                                 .font(.footnote.weight(.semibold))
@@ -175,7 +175,7 @@ private struct PreviewStatsStripView: View {
                         }
                     }
 
-                    if viewModel.isPaired == false {
+                    if viewModel.isPaired == false && viewModel.isTrustedAutoReconnect == false {
                         VStack(alignment: .leading, spacing: Layout.rowSpacing) {
                             Text("Pairing Code")
                                 .font(.footnote.weight(.semibold))
@@ -192,6 +192,16 @@ private struct PreviewStatsStripView: View {
                                     .font(.system(.body, design: .monospaced))
                             }
                         }
+                    }
+
+                    if viewModel.isTrustedAutoReconnect {
+                        Text("Trusted device: reconnecting without pairing code.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, Layout.fieldHorizontalPadding)
+                            .padding(.vertical, Layout.fieldVerticalPadding)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
                     }
                 }
 
@@ -242,10 +252,22 @@ private struct PreviewStatsStripView: View {
             zoomScale: CGFloat(previewZoomLevel),
             isAutoFollowEnabled: previewZoomLevel > 1.0
         )
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                focusedField = nil
+                dismissTypingCapture()
+            }
+        )
     }
 
     private var previewStatsStrip: some View {
         PreviewStatsStripView(preview: viewModel.screenPreview)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    focusedField = nil
+                    dismissTypingCapture()
+                }
+            )
     }
 
     private var previewControlsPanel: some View {
@@ -303,6 +325,12 @@ private struct PreviewStatsStripView: View {
             .frame(maxWidth: 210, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                focusedField = nil
+                dismissTypingCapture()
+            }
+        )
     }
 
     private var inputPanel: some View {
@@ -357,46 +385,62 @@ private struct PreviewStatsStripView: View {
 
     private var mousePanel: some View {
         VStack(alignment: .leading, spacing: Layout.panelSpacing) {
-            panelHeader(
-                title: "Mouse Control",
-                badge: "Trackpad"
-            )
+            panelHeader(title: "Trackpad")
 
-            TrackpadSurfaceView(
-                mouseScale: Layout.mouseMotionMultiplier,
-                scrollScale: Layout.scrollMultiplier,
-                isNaturalScrollingEnabled: false,
-                onMove: { deltaX, deltaY in
-                    viewModel.moveMouse(deltaX: deltaX, deltaY: deltaY)
-                },
-                onScroll: { deltaX, deltaY in
-                    viewModel.scrollMouse(deltaX: deltaX, deltaY: deltaY)
-                },
-                onClick: { button, action in
-                    viewModel.clickMouse(button: button, action: action)
-                }
-            )
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.ultraThinMaterial)
+
+                TrackpadSurfaceView(
+                    mouseScale: Layout.mouseMotionMultiplier,
+                    scrollScale: Layout.scrollMultiplier,
+                    isNaturalScrollingEnabled: false,
+                    onMove: { deltaX, deltaY in
+                        viewModel.moveMouse(deltaX: deltaX, deltaY: deltaY)
+                    },
+                    onScroll: { deltaX, deltaY in
+                        viewModel.scrollMouse(deltaX: deltaX, deltaY: deltaY)
+                    },
+                    onClick: { button, action in
+                        viewModel.clickMouse(button: button, action: action)
+                    }
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.black.opacity(0.35), lineWidth: 1.2)
+                    .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
             .frame(maxWidth: .infinity)
             .frame(maxHeight: .infinity)
             .frame(minHeight: 160)
         }
         .simultaneousGesture(
             TapGesture().onEnded {
+                focusedField = nil
                 dismissTypingCapture()
             }
         )
     }
 
-    private func panelHeader(title: String, badge: String) -> some View {
+    private func panelHeader(title: String, badge: String? = nil) -> some View {
         HStack(alignment: .center) {
             Text(title)
                 .font(.title3.weight(.semibold))
             Spacer()
-            Text(badge)
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(.thinMaterial, in: Capsule(style: .continuous))
+            if let badge {
+                Text(badge)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial, in: Capsule(style: .continuous))
+            }
         }
     }
 

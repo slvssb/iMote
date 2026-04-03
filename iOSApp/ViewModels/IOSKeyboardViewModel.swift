@@ -36,6 +36,10 @@ final class IOSKeyboardViewModel: ObservableObject {
         return false
     }
 
+    var isTrustedAutoReconnect: Bool {
+        hasTrustedSession && pairingCode.isEmpty
+    }
+
     private let browser = BonjourServiceBrowser()
     private let client = IOSWebSocketClient()
     private let h264Decoder = H264FrameDecoder()

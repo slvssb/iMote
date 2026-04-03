@@ -7,6 +7,7 @@ import UIKit
 @MainActor
 final class ScreenPreviewState: ObservableObject {
     @Published private(set) var hasFrame = false
+    @Published private(set) var sourceAspectRatio: CGFloat = 16.0 / 10.0
     @Published var statsLabel = "No frames yet"
     @Published private(set) var followAnchor = UnitPoint.center
     let displayBridge = SampleBufferDisplayBridge()
@@ -15,6 +16,7 @@ final class ScreenPreviewState: ObservableObject {
 
     private var frameTimestamps: [Date] = []
     private var smoothedFPS: Double?
+    private var displayedFPS: Int?
     private var smoothedDecodeLatencyMs: Double?
     private var timerCancellable: AnyCancellable?
 
@@ -28,10 +30,12 @@ final class ScreenPreviewState: ObservableObject {
 
     func reset() {
         hasFrame = false
+        sourceAspectRatio = 16.0 / 10.0
         frameTimestamps.removeAll()
         statsLabel = "No frames yet"
         followAnchor = .center
         smoothedFPS = nil
+        displayedFPS = nil
         smoothedDecodeLatencyMs = nil
         displayBridge.flush()
     }
@@ -48,6 +52,13 @@ final class ScreenPreviewState: ObservableObject {
     }
 
     func consumeDecodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        if let pixelBuffer = sampleBuffer.imageBuffer {
+            let width = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
+            let height = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+            if height > 0 {
+                sourceAspectRatio = width / height
+            }
+        }
         hasFrame = true
         displayBridge.enqueue(sampleBuffer)
         recordArrival()
@@ -98,7 +109,17 @@ final class ScreenPreviewState: ObservableObject {
             smoothedFPS = instantFPS
         }
 
-        let fps = Int((smoothedFPS ?? instantFPS).rounded())
+        let candidateFPS = Int((smoothedFPS ?? instantFPS).rounded())
+        if let currentDisplayed = displayedFPS {
+            // Avoid visual churn for tiny FPS fluctuations (e.g. 60 <-> 61).
+            if abs(candidateFPS - currentDisplayed) >= 3 {
+                displayedFPS = candidateFPS
+            }
+        } else {
+            displayedFPS = candidateFPS
+        }
+
+        let fps = displayedFPS ?? candidateFPS
         let ageMs = Int(now.timeIntervalSince(last) * 1000)
         let decodeMs = Int((smoothedDecodeLatencyMs ?? 0).rounded())
         statsLabel = "~\(fps) fps • decode \(decodeMs) ms • render \(ageMs) ms"
@@ -111,7 +132,7 @@ final class SampleBufferDisplayBridge {
 
     func attach(layer: AVSampleBufferDisplayLayer) {
         displayLayer = layer
-        layer.videoGravity = .resizeAspectFill
+        layer.videoGravity = .resizeAspect
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
