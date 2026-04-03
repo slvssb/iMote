@@ -103,6 +103,9 @@ private struct PreviewStatsStripView: View {
     @ObservedObject var viewModel: IOSKeyboardViewModel
     @AppStorage("preview.zoom.level") private var previewZoomLevel: Double = 2.5
     @AppStorage("preview.quality.mode") private var previewQualityModeRaw: String = PreviewQualityMode.ultra.rawValue
+    @AppStorage("pointer.profile") private var pointerProfileRaw: String = PointerProfile.edgeAssist.rawValue
+    @AppStorage("keyboard.modifier.sticky") private var stickyModifiersEnabled: Bool = true
+    @AppStorage("keyboard.repeat.interval") private var keyRepeatInterval: Double = 0.08
     @State private var isTypingCaptureActive = false
     @State private var isZoomSliderEditing = false
     @FocusState private var focusedField: Field?
@@ -151,6 +154,11 @@ private struct PreviewStatsStripView: View {
             if let storedQuality = PreviewQualityMode(rawValue: previewQualityModeRaw) {
                 viewModel.setPreviewQualityMode(storedQuality)
             }
+            if let storedProfile = PointerProfile(rawValue: pointerProfileRaw) {
+                viewModel.setPointerProfile(storedProfile)
+            }
+            viewModel.setModifierStickiness(stickyModifiersEnabled)
+            viewModel.setKeyRepeatInterval(keyRepeatInterval)
         }
     }
 
@@ -329,6 +337,65 @@ private struct PreviewStatsStripView: View {
                 .pickerStyle(.segmented)
             }
             .frame(maxWidth: 210, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pointer")
+                    .font(.footnote.weight(.semibold))
+
+                Picker("Pointer", selection: Binding(
+                    get: { viewModel.pointerProfile },
+                    set: { newValue in
+                        dismissTypingCapture()
+                        pointerProfileRaw = newValue.rawValue
+                        viewModel.setPointerProfile(newValue)
+                    }
+                )) {
+                    Text("Linear").tag(PointerProfile.linear)
+                    Text("Edge").tag(PointerProfile.edgeAssist)
+                }
+                .pickerStyle(.segmented)
+
+                Text("Thermal: \(viewModel.thermalStateLabel)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 210, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Sticky Mods", isOn: Binding(
+                    get: { stickyModifiersEnabled },
+                    set: { newValue in
+                        stickyModifiersEnabled = newValue
+                        viewModel.setModifierStickiness(newValue)
+                    }
+                ))
+                .toggleStyle(.switch)
+
+                HStack(spacing: 6) {
+                    Text("Repeat")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(value: Binding(
+                        get: { keyRepeatInterval },
+                        set: { newValue in
+                            keyRepeatInterval = min(max(newValue, 0.04), 0.20)
+                            viewModel.setKeyRepeatInterval(keyRepeatInterval)
+                        }
+                    ), in: 0.04...0.20, step: 0.01)
+                    Text("\(keyRepeatInterval, specifier: "%.2f")")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34)
+                }
+
+                HStack(spacing: 6) {
+                    quickActionButton("Lock") { viewModel.triggerQuickActionLockScreen() }
+                    quickActionButton("Mission") { viewModel.triggerQuickActionMissionControl() }
+                    quickActionButton("Switch") { viewModel.triggerQuickActionAppSwitcher() }
+                    quickActionButton("Spot") { viewModel.triggerQuickActionSpotlight() }
+                }
+            }
+            .frame(maxWidth: 260, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .simultaneousGesture(
@@ -371,7 +438,8 @@ private struct PreviewStatsStripView: View {
                     },
                     onSpecialKey: { key in
                         viewModel.sendNamedKey(key)
-                    }
+                    },
+                    keyRepeatInterval: keyRepeatInterval
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 12)
@@ -456,6 +524,12 @@ private struct PreviewStatsStripView: View {
             .padding(.vertical, Layout.fieldVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+    }
+
+    private func quickActionButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(.caption2.weight(.semibold))
+            .buttonStyle(LiquidGlassButtonStyle(tint: .gray))
     }
 
     private var backgroundGradientColors: [Color] {

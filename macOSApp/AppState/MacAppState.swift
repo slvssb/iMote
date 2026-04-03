@@ -8,6 +8,7 @@ final class MacAppState: ObservableObject {
     @Published var pairingCode = "------"
     @Published var pairingSecondsRemaining = 0
     @Published var accessibilityGranted = false
+    @Published var trustedDevicesCount = 0
     @Published var lastError: String?
 
     private let pairingManager = PairingManager()
@@ -42,6 +43,11 @@ final class MacAppState: ObservableObject {
 
     func regeneratePairCode() {
         _ = pairingManager.regenerateCode()
+        refreshPairingSnapshot()
+    }
+
+    func clearTrustedDevices() {
+        pairingManager.clearTrustedDevices()
         refreshPairingSnapshot()
     }
 
@@ -80,5 +86,6 @@ final class MacAppState: ObservableObject {
         pairingCode = snapshot.code
         let seconds = max(0, Int(snapshot.expiresAt.timeIntervalSinceNow.rounded(.down)))
         pairingSecondsRemaining = seconds
+        trustedDevicesCount = pairingManager.trustedDevicesCount()
     }
 }

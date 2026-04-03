@@ -10,6 +10,10 @@ final class IOSKeyboardViewModel: ObservableObject {
     @Published var lastError: String?
     @Published var connectionLabel = "Disconnected"
     @Published var previewQualityMode: PreviewQualityMode = .ultra
+    @Published var pointerProfile: PointerProfile = .edgeAssist
+    @Published var areModifiersSticky: Bool = true
+    @Published var keyRepeatInterval: Double = 0.08
+    @Published private(set) var thermalStateLabel: String = "Nominal"
 
     let screenPreview = ScreenPreviewState()
 
@@ -46,6 +50,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
 
     private let trustedSessionKey = "remoteKeyboard.trustedSession"
+
     private var hasTrustedSession: Bool {
         get { UserDefaults.standard.bool(forKey: trustedSessionKey) }
         set { UserDefaults.standard.set(newValue, forKey: trustedSessionKey) }
@@ -91,7 +96,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                 case .paired:
                     self.connectionLabel = "Paired and ready"
                     self.hasTrustedSession = true
-                    self.client.sendStreamConfig(qualityMode: self.previewQualityMode)
+                    self.client.sendStreamConfig(qualityMode: self.previewQualityMode, pointerProfile: self.pointerProfile)
                 case let .failed(reason):
                     self.connectionLabel = "Failed"
                     self.lastError = reason
@@ -138,6 +143,24 @@ final class IOSKeyboardViewModel: ObservableObject {
             guard let self else { return }
             self.screenPreview.updateCursorPosition(x: x, y: y)
         }
+
+        client.onTelemetry = { [weak self] fps, captureWidth, bitrateScale, skipRatio in
+            guard let self else { return }
+            self.screenPreview.updateStreamTelemetry(
+                serverFPS: fps,
+                captureWidth: captureWidth,
+                bitrateScale: bitrateScale,
+                skipRatio: skipRatio
+            )
+        }
+
+        NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.handleThermalStateChange()
+            }
+            .store(in: &cancellables)
+        handleThermalStateChange()
     }
 
     func start() {
@@ -195,23 +218,28 @@ final class IOSKeyboardViewModel: ObservableObject {
             } else {
                 client.sendText(value)
             }
+            consumeOneShotModifiersIfNeeded()
             return
         }
 
         let keyName = normalizeKeyCharacter(character)
         client.sendKey(keyName, modifiers: modifiers, action: .tap)
+        consumeOneShotModifiersIfNeeded()
     }
 
     func handleBackspace() {
         client.sendKey(KeyboardNamedKey.backspace.rawValue, modifiers: Array(activeModifiers), action: .tap)
+        consumeOneShotModifiersIfNeeded()
     }
 
     func handleReturn() {
         client.sendKey(KeyboardNamedKey.enter.rawValue, modifiers: Array(activeModifiers), action: .tap)
+        consumeOneShotModifiersIfNeeded()
     }
 
     func sendNamedKey(_ key: KeyboardNamedKey) {
         client.sendKey(key.rawValue, modifiers: Array(activeModifiers), action: .tap)
+        consumeOneShotModifiersIfNeeded()
     }
 
     func moveMouse(deltaX: Double, deltaY: Double) {
@@ -229,7 +257,40 @@ final class IOSKeyboardViewModel: ObservableObject {
     func setPreviewQualityMode(_ mode: PreviewQualityMode) {
         guard previewQualityMode != mode else { return }
         previewQualityMode = mode
-        client.sendStreamConfig(qualityMode: mode)
+        client.sendStreamConfig(qualityMode: mode, pointerProfile: pointerProfile)
+    }
+
+    func setPointerProfile(_ profile: PointerProfile) {
+        guard pointerProfile != profile else { return }
+        pointerProfile = profile
+        client.sendStreamConfig(qualityMode: previewQualityMode, pointerProfile: profile)
+    }
+
+    func setModifierStickiness(_ isSticky: Bool) {
+        areModifiersSticky = isSticky
+        if isSticky == false {
+            activeModifiers.removeAll()
+        }
+    }
+
+    func setKeyRepeatInterval(_ interval: Double) {
+        keyRepeatInterval = min(max(interval, 0.04), 0.20)
+    }
+
+    func triggerQuickActionLockScreen() {
+        client.sendKey("q", modifiers: [.control, .command], action: .tap)
+    }
+
+    func triggerQuickActionMissionControl() {
+        client.sendKey(KeyboardNamedKey.upArrow.rawValue, modifiers: [.control], action: .tap)
+    }
+
+    func triggerQuickActionAppSwitcher() {
+        client.sendKey(KeyboardNamedKey.tab.rawValue, modifiers: [.command], action: .tap)
+    }
+
+    func triggerQuickActionSpotlight() {
+        client.sendKey(KeyboardNamedKey.space.rawValue, modifiers: [.command], action: .tap)
     }
 
     private func shiftedBaseKey(for character: Character) -> String? {
@@ -254,5 +315,31 @@ final class IOSKeyboardViewModel: ObservableObject {
             return KeyboardNamedKey.space.rawValue
         }
         return String(character).lowercased()
+    }
+
+    private func consumeOneShotModifiersIfNeeded() {
+        guard areModifiersSticky == false, activeModifiers.isEmpty == false else { return }
+        activeModifiers.removeAll()
+    }
+
+    private func handleThermalStateChange() {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal:
+            thermalStateLabel = "Nominal"
+        case .fair:
+            thermalStateLabel = "Fair"
+        case .serious:
+            thermalStateLabel = "Serious"
+            if previewQualityMode != .balanced {
+                setPreviewQualityMode(.balanced)
+            }
+        case .critical:
+            thermalStateLabel = "Critical"
+            if previewQualityMode != .balanced {
+                setPreviewQualityMode(.balanced)
+            }
+        @unknown default:
+            thermalStateLabel = "Unknown"
+        }
     }
 }

@@ -10,6 +10,7 @@ struct HiddenTextInputView: UIViewRepresentable {
     var onReturn: () -> Void
     var onToggleModifier: (RemoteModifier) -> Void
     var onSpecialKey: (KeyboardNamedKey) -> Void
+    var keyRepeatInterval: TimeInterval
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: HiddenTextInputView
@@ -179,6 +180,7 @@ struct HiddenTextInputView: UIViewRepresentable {
         }
         field.delegate = context.coordinator
         field.keyboardToolbar = accessory
+        accessory.keyRepeatInterval = keyRepeatInterval
         field.inputAccessoryView = accessory
         field.backspaceWhenEmptyHandler = {
             context.coordinator.parent.onBackspace()
@@ -237,6 +239,7 @@ struct HiddenTextInputView: UIViewRepresentable {
     func updateUIView(_ uiView: BackspaceTextView, context: Context) {
         context.coordinator.parent = self
         uiView.keyboardToolbar?.updateModifierState(activeModifiers)
+        uiView.keyboardToolbar?.keyRepeatInterval = keyRepeatInterval
         uiView.lockFocus = isActive
 
         if isActive && uiView.isFirstResponder == false {
@@ -346,8 +349,12 @@ final class BackspaceTextView: UITextView {
 final class KeyboardAccessoryView: UIInputView {
     var onModifierTapped: ((RemoteModifier) -> Void)?
     var onSpecialKeyTapped: ((KeyboardNamedKey) -> Void)?
+    var keyRepeatInterval: TimeInterval = 0.08
 
     private var modifierButtons: [RemoteModifier: UIButton] = [:]
+    private var specialButtonMap: [UIButton: KeyboardNamedKey] = [:]
+    private var repeatTimer: Timer?
+    private weak var repeatButton: UIButton?
     private let accessoryHeight: CGFloat = 96
 
     override var intrinsicContentSize: CGSize {
@@ -452,11 +459,68 @@ final class KeyboardAccessoryView: UIInputView {
             button.addAction(UIAction { [weak self] _ in
                 self?.onSpecialKeyTapped?(key)
             }, for: .touchUpInside)
+            specialButtonMap[button] = key
+            button.addTarget(self, action: #selector(handleRepeatTouchDown(_:)), for: .touchDown)
+            button.addTarget(self, action: #selector(handleRepeatTouchUp(_:)), for: .touchUpInside)
+            button.addTarget(self, action: #selector(handleRepeatTouchUp(_:)), for: .touchUpOutside)
+            button.addTarget(self, action: #selector(handleRepeatTouchUp(_:)), for: .touchCancel)
             specialRow.addArrangedSubview(button)
         }
 
         root.addArrangedSubview(modifierRow)
         root.addArrangedSubview(specialRow)
+    }
+
+    @objc private func handleRepeatTouchDown(_ sender: UIButton) {
+        guard let key = specialButtonMap[sender], isRepeatableKey(key) else { return }
+        repeatButton = sender
+        repeatTimer?.invalidate()
+
+        let timer = Timer(timeInterval: 0.35, target: self, selector: #selector(handleInitialRepeatFire), userInfo: nil, repeats: false)
+        repeatTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    @objc private func handleRepeatTouchUp(_ sender: UIButton) {
+        guard repeatButton === sender else { return }
+        repeatButton = nil
+        repeatTimer?.invalidate()
+        repeatTimer = nil
+    }
+
+    @objc private func handleInitialRepeatFire() {
+        guard let repeatButton,
+              let repeatingKey = specialButtonMap[repeatButton] else {
+            repeatTimer?.invalidate()
+            repeatTimer = nil
+            return
+        }
+
+        onSpecialKeyTapped?(repeatingKey)
+        repeatTimer?.invalidate()
+
+        let timer = Timer(timeInterval: keyRepeatInterval, target: self, selector: #selector(handleRepeatFire), userInfo: nil, repeats: true)
+        repeatTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    @objc private func handleRepeatFire() {
+        guard let repeatButton,
+              let repeatingKey = specialButtonMap[repeatButton] else {
+            repeatTimer?.invalidate()
+            repeatTimer = nil
+            return
+        }
+        onSpecialKeyTapped?(repeatingKey)
+    }
+
+    private func isRepeatableKey(_ key: KeyboardNamedKey) -> Bool {
+        switch key {
+        case .backspace, .leftArrow, .rightArrow, .upArrow, .downArrow:
+            return true
+        default:
+            return false
+        }
     }
 
     private func modifierConfiguration(title: String, active: Bool) -> UIButton.Configuration {

@@ -19,6 +19,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onCursorPosition: ((Double, Double) -> Void)?
     var onH264Config: ((Data) -> Void)?
     var onH264Frame: ((Data) -> Void)?
+    var onTelemetry: ((Double, Double, Double, Double) -> Void)?
 
     private var session: URLSession!
     private var task: URLSessionWebSocketTask?
@@ -33,6 +34,8 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private enum BinaryPacketMarker {
         static let h264Config: UInt8 = 0x10
         static let h264Frame: UInt8 = 0x11
+        static let hevcConfig: UInt8 = 0x12
+        static let hevcFrame: UInt8 = 0x13
     }
 
     override init() {
@@ -97,8 +100,8 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(RemoteMessage.mouseScroll(scrollX: scrollX, scrollY: scrollY, token: pairedToken))
     }
 
-    func sendStreamConfig(qualityMode: PreviewQualityMode) {
-        sendMessage(RemoteMessage.streamConfig(qualityMode: qualityMode, token: pairedToken))
+    func sendStreamConfig(qualityMode: PreviewQualityMode, pointerProfile: PointerProfile? = nil) {
+        sendMessage(RemoteMessage.streamConfig(qualityMode: qualityMode, pointerProfile: pointerProfile, token: pairedToken))
     }
 
     private func sendPairing(code: String) {
@@ -178,6 +181,12 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                 if let x = decoded.cursorX, let y = decoded.cursorY {
                     onCursorPosition?(x, y)
                 }
+            case .telemetry:
+                let fps = decoded.serverFPS ?? 0
+                let width = decoded.captureWidth ?? 0
+                let bitrateScale = decoded.adaptiveBitrateScale ?? 1
+                let skipRatio = decoded.skipRatio ?? 0
+                onTelemetry?(fps, width, bitrateScale, skipRatio)
             case .pong:
                 break
             default:
@@ -196,10 +205,10 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         let payload = data.dropFirst()
 
         switch marker {
-        case BinaryPacketMarker.h264Config:
+        case BinaryPacketMarker.h264Config, BinaryPacketMarker.hevcConfig:
             onH264Config?(Data(payload))
             return true
-        case BinaryPacketMarker.h264Frame:
+        case BinaryPacketMarker.h264Frame, BinaryPacketMarker.hevcFrame:
             onH264Frame?(Data(payload))
             return true
         default:
@@ -252,7 +261,9 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         }
 
         reconnectAttempts += 1
-        let delay = min(Double(reconnectAttempts), 4)
+        let backoff = min(pow(1.6, Double(reconnectAttempts)), 8)
+        let jitter = Double.random(in: 0...0.45)
+        let delay = backoff + jitter
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.connect(host: host, port: port, pairingCode: pairCode)
         }
