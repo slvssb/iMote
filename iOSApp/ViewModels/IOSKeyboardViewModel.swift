@@ -10,6 +10,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     @Published var lastError: String?
     @Published var connectionLabel = "Disconnected"
     @Published var previewQualityMode: PreviewQualityMode = .ultra
+    @Published var isThermalQualityOverrideActive = false
 
     let screenPreview = ScreenPreviewState()
 
@@ -83,6 +84,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                 switch state {
                 case .disconnected:
                     self.connectionLabel = "Disconnected"
+                    self.isThermalQualityOverrideActive = false
                     self.screenPreview.reset()
                 case .connecting:
                     self.connectionLabel = "Connecting…"
@@ -95,6 +97,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                 case let .failed(reason):
                     self.connectionLabel = "Failed"
                     self.lastError = reason
+                    self.isThermalQualityOverrideActive = false
                     self.screenPreview.reset()
                     if self.hasTrustedSession,
                        self.pairingCode.isEmpty,
@@ -138,6 +141,11 @@ final class IOSKeyboardViewModel: ObservableObject {
         client.onCursorPosition = { [weak self] x, y in
             guard let self else { return }
             self.screenPreview.updateCursorPosition(x: x, y: y)
+        }
+
+        client.onThermalOverrideChanged = { [weak self] isActive in
+            guard let self else { return }
+            self.isThermalQualityOverrideActive = isActive
         }
     }
 

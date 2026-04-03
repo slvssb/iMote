@@ -28,13 +28,17 @@ final class MacWebSocketServer: @unchecked Sendable {
     private let screenCaptureProvider = MacScreenCaptureProvider()
     private let h264Encoder = H264FrameEncoder()
     private let queue = DispatchQueue(label: "remote.keyboard.mac.ws")
+    private var thermalObserver: NSObjectProtocol?
 
     private var listener: NWListener?
     private var clients: [UUID: ClientContext] = [:]
     private var frameTimer: DispatchSourceTimer?
     private var isFrameCaptureInFlight = false
     private var consecutiveFrameFailures = 0
-    private var previewQualityMode: PreviewQualityMode = .ultra
+    private var userSelectedQualityMode: PreviewQualityMode = .ultra
+    private var effectiveQualityMode: PreviewQualityMode = .ultra
+    private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+    private var isThermalOverrideActive = false
     private var previewCaptureMaxWidth: CGFloat = 1920
     private var adaptiveBitrateScale: Double = 1.0
     private var adaptiveWindowTickCount = 0
@@ -55,6 +59,24 @@ final class MacWebSocketServer: @unchecked Sendable {
                     self.sendBinaryFrame(packet, to: id)
                 }
             }
+        }
+
+        thermalObserver = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            let state = ProcessInfo.processInfo.thermalState
+            self.queue.async {
+                self.handleThermalStateChange(state)
+            }
+        }
+    }
+
+    deinit {
+        if let thermalObserver {
+            NotificationCenter.default.removeObserver(thermalObserver)
         }
     }
 
@@ -214,6 +236,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             context.deviceName = message.deviceName
             clients[id] = context
             send(.pairAck(success: true, token: token, reason: nil), to: id)
+            sendStreamStatus(to: id)
             publishClients()
         } else {
             send(.pairAck(success: false, token: nil, reason: result.reason), to: id)
@@ -311,16 +334,8 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard let mode = message.qualityMode else { return }
-        previewQualityMode = mode
-
-        switch mode {
-        case .balanced:
-            previewCaptureMaxWidth = 1440
-            h264Encoder.setQualityProfile(.balanced)
-        case .ultra:
-            previewCaptureMaxWidth = 1920
-            h264Encoder.setQualityProfile(.ultra)
-        }
+        userSelectedQualityMode = mode
+        applyEffectiveQualityMode()
     }
 
     private func authorize(id: UUID, token: String?) -> Bool {
@@ -373,6 +388,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private func startFrameBroadcasting() {
         guard frameTimer == nil else { return }
 
+        applyEffectiveQualityMode()
         adaptiveBitrateScale = 1.0
         adaptiveWindowTickCount = 0
         adaptiveWindowSkippedCount = 0
@@ -474,6 +490,57 @@ final class MacWebSocketServer: @unchecked Sendable {
     private func reportError(_ reason: String) {
         Task { @MainActor in
             self.onRuntimeError?(reason)
+        }
+    }
+
+    private func handleThermalStateChange(_ state: ProcessInfo.ThermalState) {
+        guard thermalState != state else { return }
+        thermalState = state
+
+        switch state {
+        case .serious, .critical:
+            isThermalOverrideActive = true
+            Task { @MainActor in
+                self.onStateChange?("Thermal pressure high. Auto-switched preview to Balanced.")
+            }
+        case .nominal, .fair:
+            isThermalOverrideActive = false
+            Task { @MainActor in
+                self.onStateChange?("Thermal pressure recovered. Restoring selected preview quality.")
+            }
+        @unknown default:
+            break
+        }
+
+        applyEffectiveQualityMode()
+        sendStreamStatusToAllPairedClients()
+    }
+
+    private func applyEffectiveQualityMode() {
+        let nextMode: PreviewQualityMode = isThermalOverrideActive ? .balanced : userSelectedQualityMode
+        guard effectiveQualityMode != nextMode else { return }
+        effectiveQualityMode = nextMode
+
+        switch nextMode {
+        case .balanced:
+            previewCaptureMaxWidth = 1440
+            h264Encoder.setQualityProfile(.balanced)
+        case .ultra:
+            previewCaptureMaxWidth = 1920
+            h264Encoder.setQualityProfile(.ultra)
+        }
+    }
+
+    private func sendStreamStatus(to id: UUID) {
+        send(.streamStatus(thermalOverrideActive: isThermalOverrideActive), to: id)
+    }
+
+    private func sendStreamStatusToAllPairedClients() {
+        let pairedClientIDs = clients.compactMap { id, context in
+            context.token == nil ? nil : id
+        }
+        for id in pairedClientIDs {
+            sendStreamStatus(to: id)
         }
     }
 }

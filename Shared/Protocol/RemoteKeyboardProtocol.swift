@@ -10,6 +10,7 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case mouseScroll
     case cursorPosition
     case streamConfig
+    case streamStatus
     case screenFrame
     case ping
     case pong
@@ -60,6 +61,7 @@ public struct RemoteMessage: Codable, Sendable {
     public var cursorY: Double?
     public var button: MouseButton?
     public var qualityMode: PreviewQualityMode?
+    public var thermalOverrideActive: Bool?
     public var frameBase64: String?
 
     public init(
@@ -82,6 +84,7 @@ public struct RemoteMessage: Codable, Sendable {
         cursorY: Double? = nil,
         button: MouseButton? = nil,
         qualityMode: PreviewQualityMode? = nil,
+        thermalOverrideActive: Bool? = nil,
         frameBase64: String? = nil
     ) {
         self.type = type
@@ -103,6 +106,7 @@ public struct RemoteMessage: Codable, Sendable {
         self.cursorY = cursorY
         self.button = button
         self.qualityMode = qualityMode
+        self.thermalOverrideActive = thermalOverrideActive
         self.frameBase64 = frameBase64
     }
 
@@ -145,6 +149,10 @@ public struct RemoteMessage: Codable, Sendable {
 
     public static func streamConfig(qualityMode: PreviewQualityMode, token: String?) -> RemoteMessage {
         RemoteMessage(type: .streamConfig, token: token, qualityMode: qualityMode)
+    }
+
+    public static func streamStatus(thermalOverrideActive: Bool) -> RemoteMessage {
+        RemoteMessage(type: .streamStatus, thermalOverrideActive: thermalOverrideActive)
     }
 
     public static func screenFrame(frameBase64: String) -> RemoteMessage {

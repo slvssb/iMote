@@ -152,6 +152,7 @@ private struct PreviewStatsStripView: View {
                 viewModel.setPreviewQualityMode(storedQuality)
             }
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private var connectionPanel: some View {
@@ -327,6 +328,7 @@ private struct PreviewStatsStripView: View {
                     Text("Ultra").tag(PreviewQualityMode.ultra)
                 }
                 .pickerStyle(.segmented)
+                .disabled(viewModel.isThermalQualityOverrideActive)
             }
             .frame(maxWidth: 210, alignment: .leading)
         }

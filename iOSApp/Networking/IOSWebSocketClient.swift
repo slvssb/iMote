@@ -19,6 +19,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onCursorPosition: ((Double, Double) -> Void)?
     var onH264Config: ((Data) -> Void)?
     var onH264Frame: ((Data) -> Void)?
+    var onThermalOverrideChanged: ((Bool) -> Void)?
 
     private var session: URLSession!
     private var task: URLSessionWebSocketTask?
@@ -184,6 +185,8 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                 }
             case .pong:
                 break
+            case .streamStatus:
+                onThermalOverrideChanged?(decoded.thermalOverrideActive ?? false)
             default:
                 break
             }
