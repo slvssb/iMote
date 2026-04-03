@@ -18,7 +18,6 @@ final class ScreenPreviewState: ObservableObject {
     private var smoothedFPS: Double?
     private var displayedFPS: Int?
     private var smoothedDecodeLatencyMs: Double?
-    private var videoCodecLabel: String?
     private var timerCancellable: AnyCancellable?
 
     init() {
@@ -38,7 +37,6 @@ final class ScreenPreviewState: ObservableObject {
         smoothedFPS = nil
         displayedFPS = nil
         smoothedDecodeLatencyMs = nil
-        videoCodecLabel = nil
         displayBridge.flush()
     }
 
@@ -86,11 +84,6 @@ final class ScreenPreviewState: ObservableObject {
         updateStatsLabel()
     }
 
-    func updateVideoCodecLabel(_ label: String) {
-        videoCodecLabel = label
-        updateStatsLabel()
-    }
-
     private func recordArrival() {
         let now = Date()
         frameTimestamps.append(now)
@@ -129,12 +122,7 @@ final class ScreenPreviewState: ObservableObject {
         let fps = displayedFPS ?? candidateFPS
         let ageMs = Int(now.timeIntervalSince(last) * 1000)
         let decodeMs = Int((smoothedDecodeLatencyMs ?? 0).rounded())
-
-        var label = "~\(fps) fps • decode \(decodeMs) ms • render \(ageMs) ms"
-        if let videoCodecLabel {
-            label += " • codec \(videoCodecLabel)"
-        }
-        statsLabel = label
+        statsLabel = "~\(fps) fps • decode \(decodeMs) ms • render \(ageMs) ms"
     }
 }
 
