@@ -1,4 +1,5 @@
 import ApplicationServices
+import AppKit
 import Foundation
 
 enum KeyboardInjectorError: LocalizedError {
@@ -27,6 +28,8 @@ final class KeyboardInjector {
     private var lastMouseTapLocation: CGPoint = .zero
     private var lastMouseTapButton: MouseButton?
     private var lastMouseTapClickCount: Int64 = 0
+    private var isSystemEventsControlArrowAuthorized = true
+    private var debugMouseMoveInjectCount: Int64 = 0
 
     init(permissionManager: AccessibilityPermissionManager) {
         self.permissionManager = permissionManager
@@ -50,6 +53,7 @@ final class KeyboardInjector {
         guard let keyCode = mapper.keyCode(for: normalizedKey) else {
             throw KeyboardInjectorError.keyNotMapped("\(key) (normalized: \(normalizedKey))")
         }
+        print("[TempKeyLog][Injector] key=\(key) normalized=\(normalizedKey) keyCode=\(keyCode) action=\(action.rawValue) modifiers=\(modifiers.map { $0.rawValue })")
 
         let flags = mapper.eventFlags(for: modifiers)
         switch action {
@@ -58,8 +62,18 @@ final class KeyboardInjector {
         case .up:
             try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
         case .tap:
-            try postKeyEvent(keyCode: keyCode, keyDown: true, flags: flags)
-            try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
+            if shouldUseControlArrowShortcutPath(keyCode: keyCode, modifiers: modifiers) {
+                print("[TempKeyLog][Injector] path=controlArrowShortcut")
+                try postControlArrowShortcutTap(keyCode: keyCode)
+                return
+            }
+            print("[TempKeyLog][Injector] path=standardTap modifiersEmpty=\(modifiers.isEmpty)")
+            if modifiers.isEmpty {
+                try postKeyEvent(keyCode: keyCode, keyDown: true, flags: flags)
+                try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
+            } else {
+                try postModifiedTap(keyCode: keyCode, modifiers: modifiers, flags: flags)
+            }
         }
     }
 
@@ -77,6 +91,10 @@ final class KeyboardInjector {
         let adjustedDelta = adjustedEdgeAwareDelta(from: current, deltaX: deltaX, deltaY: deltaY)
         let rawNextPoint = CGPoint(x: current.x + adjustedDelta.x, y: current.y - adjustedDelta.y)
         let nextPoint = clampedPointToActiveDisplays(rawNextPoint)
+        debugMouseMoveInjectCount += 1
+        if debugMouseMoveInjectCount % 20 == 0 {
+            print("[EyeCursor][Injector] move count=\(debugMouseMoveInjectCount) current=(\(current.x),\(current.y)) rawDelta=(\(deltaX),\(deltaY)) adjustedDelta=(\(adjustedDelta.x),\(adjustedDelta.y)) next=(\(nextPoint.x),\(nextPoint.y))")
+        }
         guard let moveEvent = CGEvent(
             mouseEventSource: eventSource,
             mouseType: .mouseMoved,
@@ -155,11 +173,122 @@ final class KeyboardInjector {
     }
 
     private func postKeyEvent(keyCode: CGKeyCode, keyDown: Bool, flags: CGEventFlags) throws {
-        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: keyDown) else {
+        guard
+            let source = CGEventSource(stateID: .combinedSessionState),
+            let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: keyDown)
+        else {
             throw KeyboardInjectorError.eventBuildFailed
         }
         event.flags = flags
-        event.post(tap: .cghidEventTap)
+        print("[TempKeyLog][PostKeyEvent] keyCode=\(keyCode) keyDown=\(keyDown) flags=\(formatFlags(flags)) tap=cgSessionEventTap")
+        event.post(tap: .cgSessionEventTap)
+    }
+
+    private func shouldUseControlArrowShortcutPath(keyCode: CGKeyCode, modifiers: [RemoteModifier]) -> Bool {
+        guard modifiers.count == 1, modifiers.first == .control else { return false }
+        return (123...126).contains(Int(keyCode))
+    }
+
+    private func postControlArrowShortcutTap(keyCode: CGKeyCode) throws {
+        if performSystemEventsControlArrow(keyCode: keyCode) {
+            print("[TempKeyLog][ControlArrow] path=systemEvents keyCode=\(keyCode)")
+            return
+        }
+
+        let controlFlags: CGEventFlags = [.maskControl]
+        guard
+            let source = CGEventSource(stateID: .combinedSessionState),
+            let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+            let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        else {
+            throw KeyboardInjectorError.eventBuildFailed
+        }
+
+        keyDown.flags = controlFlags
+        keyUp.flags = controlFlags
+
+        print("[TempKeyLog][ControlArrow] source=combinedSessionState keyCode=\(keyCode) downFlags=\(formatFlags(keyDown.flags)) upFlags=\(formatFlags(keyUp.flags)) tap=cghidEventTap")
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
+    private func performSystemEventsControlArrow(keyCode: CGKeyCode) -> Bool {
+        guard isSystemEventsControlArrowAuthorized else { return false }
+        guard [123, 124, 125, 126].contains(Int(keyCode)) else { return false }
+        let script = """
+        tell application "System Events"
+            key code \(keyCode) using control down
+        end tell
+        """
+
+        let execution: (result: Bool, scriptError: NSDictionary?)
+        if Thread.isMainThread {
+            var scriptError: NSDictionary?
+            guard let appleScript = NSAppleScript(source: script) else { return false }
+            _ = appleScript.executeAndReturnError(&scriptError)
+            execution = (scriptError == nil, scriptError)
+        } else {
+            execution = DispatchQueue.main.sync {
+                var scriptError: NSDictionary?
+                guard let appleScript = NSAppleScript(source: script) else { return (false, nil) }
+                _ = appleScript.executeAndReturnError(&scriptError)
+                return (scriptError == nil, scriptError)
+            }
+        }
+
+        if let scriptError = execution.scriptError {
+            let errorNumber = (scriptError["NSAppleScriptErrorNumber"] as? NSNumber)?.intValue
+            if errorNumber == -1743 {
+                isSystemEventsControlArrowAuthorized = false
+                print("[TempKeyLog][ControlArrow] System Events automation not authorized (-1743). Falling back to CGEvent path.")
+            } else {
+                print("[TempKeyLog][ControlArrow] systemEventsError=\(scriptError)")
+            }
+        }
+        return execution.result
+    }
+
+    private func formatFlags(_ flags: CGEventFlags) -> String {
+        let names: [String] = [
+            flags.contains(.maskCommand) ? "command" : nil,
+            flags.contains(.maskAlternate) ? "option" : nil,
+            flags.contains(.maskShift) ? "shift" : nil,
+            flags.contains(.maskControl) ? "control" : nil
+        ].compactMap { $0 }
+        return "\(names) raw=\(flags.rawValue)"
+    }
+
+    private func postModifiedTap(keyCode: CGKeyCode, modifiers: [RemoteModifier], flags: CGEventFlags) throws {
+        let modifierKeyCodes = modifiers.compactMap(modifierKeyCode(for:))
+        if modifierKeyCodes.isEmpty {
+            try postKeyEvent(keyCode: keyCode, keyDown: true, flags: flags)
+            try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
+            return
+        }
+
+        for modifierKeyCode in modifierKeyCodes {
+            try postKeyEvent(keyCode: modifierKeyCode, keyDown: true, flags: [])
+        }
+
+        try postKeyEvent(keyCode: keyCode, keyDown: true, flags: flags)
+        try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
+
+        for modifierKeyCode in modifierKeyCodes.reversed() {
+            try postKeyEvent(keyCode: modifierKeyCode, keyDown: false, flags: [])
+        }
+    }
+
+    private func modifierKeyCode(for modifier: RemoteModifier) -> CGKeyCode? {
+        switch modifier {
+        case .command:
+            return 55
+        case .option:
+            return 58
+        case .shift:
+            return 56
+        case .control:
+            return 59
+        }
     }
 
     private func postMouseEvent(

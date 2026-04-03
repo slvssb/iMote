@@ -45,6 +45,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var adaptiveWindowTickCount = 0
     private var adaptiveWindowSkippedCount = 0
     private var adaptiveWindowEncodedCount = 0
+    private var debugMouseMoveReceiveCount = 0
 
     init(pairingManager: PairingManager, injector: KeyboardInjector) {
         self.pairingManager = pairingManager
@@ -277,6 +278,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         guard let key = message.key else { return }
         let action = message.action ?? .tap
         let modifiers = message.modifiers ?? []
+        print("[TempKeyLog][Server] key=\(key) action=\(action.rawValue) modifiers=\(modifiers.map { $0.rawValue })")
         do {
             try injector.injectKey(key: key, modifiers: modifiers, action: action)
         } catch {
@@ -294,6 +296,10 @@ final class MacWebSocketServer: @unchecked Sendable {
         let deltaX = message.deltaX ?? 0
         let deltaY = message.deltaY ?? 0
         guard deltaX != 0 || deltaY != 0 else { return }
+        debugMouseMoveReceiveCount += 1
+        if debugMouseMoveReceiveCount % 20 == 0 {
+            print("[EyeCursor][WS->Host] mouseMove count=\(debugMouseMoveReceiveCount) dx=\(deltaX) dy=\(deltaY) client=\(id)")
+        }
 
         do {
             try injector.injectMouseMove(deltaX: deltaX, deltaY: deltaY)

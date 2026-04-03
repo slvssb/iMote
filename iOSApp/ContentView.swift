@@ -175,6 +175,8 @@ private struct MacCenteredLogoOverlay: View {
     @AppStorage("preview.zoom.level") private var previewZoomLevel: Double = 2.5
     @AppStorage("preview.quality.mode") private var previewQualityModeRaw: String = PreviewQualityMode.ultra.rawValue
     @AppStorage("preview.virtual.overscan.enabled") private var isVirtualOverscanEnabled = false
+    @AppStorage("input.eye.cursor.enabled") private var isEyeCursorEnabled = false
+    @AppStorage("feature.eye.cursor.experimental.enabled") private var isEyeCursorExperimentalEnabled = false
     @State private var isTypingCaptureActive = false
     @State private var isZoomSliderEditing = false
     @State private var isConfigSheetPresented = false
@@ -198,6 +200,7 @@ private struct MacCenteredLogoOverlay: View {
     @State private var isStatsSectionVisible = false
     @State private var isKeyboardSectionVisible = false
     @State private var isTrackpadSectionVisible = false
+    @StateObject private var eyeCursorController = EyeCursorController()
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -298,6 +301,10 @@ private struct MacCenteredLogoOverlay: View {
         .onAppear {
             previewZoomLevel = clampedZoom(previewZoomLevel)
             viewModel.setPreviewZoomLevel(previewZoomLevel)
+            eyeCursorController.onMove = { deltaX, deltaY in
+                viewModel.moveMouse(deltaX: deltaX, deltaY: deltaY)
+            }
+            updateEyeCursorState()
             if let storedQuality = PreviewQualityMode(rawValue: previewQualityModeRaw) {
                 viewModel.setPreviewQualityMode(storedQuality)
             }
@@ -305,10 +312,23 @@ private struct MacCenteredLogoOverlay: View {
                 beginConnectSequence()
             }
         }
+        .onDisappear {
+            eyeCursorController.stop()
+        }
         .onChange(of: previewZoomLevel) { _, newValue in
             viewModel.setPreviewZoomLevel(newValue)
         }
+        .onChange(of: isEyeCursorEnabled) { _, _ in
+            updateEyeCursorState()
+        }
+        .onChange(of: isEyeCursorExperimentalEnabled) { _, isEnabled in
+            if isEnabled == false {
+                isEyeCursorEnabled = false
+            }
+            updateEyeCursorState()
+        }
         .onChange(of: viewModel.isPaired) { wasPaired, isPaired in
+            updateEyeCursorState()
             if isPaired {
                 cancelDisconnectSequence()
                 beginConnectSequence()
@@ -743,6 +763,37 @@ private struct MacCenteredLogoOverlay: View {
             .padding(.vertical, Layout.fieldVerticalPadding)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
 
+            HStack(spacing: 12) {
+                Text("Experimental eye tracking")
+                    .font(.footnote.weight(.semibold))
+                Spacer(minLength: 0)
+                Toggle("", isOn: $isEyeCursorExperimentalEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .padding(.horizontal, Layout.fieldHorizontalPadding)
+            .padding(.vertical, Layout.fieldVerticalPadding)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+
+            if isEyeCursorExperimentalEnabled {
+                HStack(spacing: 12) {
+                    Text("Eye cursor control")
+                        .font(.footnote.weight(.semibold))
+                    Spacer(minLength: 0)
+                    Toggle("", isOn: $isEyeCursorEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .padding(.horizontal, Layout.fieldHorizontalPadding)
+                .padding(.vertical, Layout.fieldVerticalPadding)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+
+                Text("Experimental. Uses front camera to map eye movement to cursor.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, Layout.fieldHorizontalPadding)
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 Text("Preview quality")
                     .font(.footnote.weight(.semibold))
@@ -857,6 +908,18 @@ private struct MacCenteredLogoOverlay: View {
                     },
                     onClick: { button, action in
                         viewModel.clickMouse(button: button, action: action)
+                    },
+                    onFourFingerSwipe: { direction in
+                        switch direction {
+                        case .up:
+                            viewModel.sendNamedKey(.upArrow, modifiers: [.control])
+                        case .down:
+                            viewModel.sendNamedKey(.downArrow, modifiers: [.control])
+                        case .left:
+                            viewModel.sendNamedKey(.leftArrow, modifiers: [.control])
+                        case .right:
+                            viewModel.sendNamedKey(.rightArrow, modifiers: [.control])
+                        }
                     }
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -938,6 +1001,15 @@ private struct MacCenteredLogoOverlay: View {
     private func dismissTypingCapture() {
         if isTypingCaptureActive {
             isTypingCaptureActive = false
+        }
+    }
+
+    private func updateEyeCursorState() {
+        print("[EyeCursor][ContentView] update state: experimental=\(isEyeCursorExperimentalEnabled) enabled=\(isEyeCursorEnabled) paired=\(viewModel.isPaired)")
+        if isEyeCursorExperimentalEnabled && isEyeCursorEnabled && viewModel.isPaired {
+            eyeCursorController.start()
+        } else {
+            eyeCursorController.stop()
         }
     }
 

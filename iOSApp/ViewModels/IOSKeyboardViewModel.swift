@@ -262,6 +262,10 @@ final class IOSKeyboardViewModel: ObservableObject {
         client.sendKey(key.rawValue, modifiers: Array(activeModifiers), action: .tap)
     }
 
+    func sendNamedKey(_ key: KeyboardNamedKey, modifiers: [RemoteModifier]) {
+        client.sendKey(key.rawValue, modifiers: modifiers, action: .tap)
+    }
+
     func moveMouse(deltaX: Double, deltaY: Double) {
         client.sendMouseMove(deltaX: deltaX, deltaY: deltaY)
     }

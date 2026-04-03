@@ -2,18 +2,27 @@ import SwiftUI
 import UIKit
 
 struct TrackpadSurfaceView: UIViewRepresentable {
+    enum SwipeDirection {
+        case up
+        case down
+        case left
+        case right
+    }
+
     var mouseScale: Double
     var scrollScale: Double
     var isNaturalScrollingEnabled: Bool
     var onMove: (Double, Double) -> Void
     var onScroll: (Double, Double) -> Void
     var onClick: (MouseButton, KeyAction) -> Void
+    var onFourFingerSwipe: (SwipeDirection) -> Void
 
     func makeUIView(context: Context) -> TrackpadGestureView {
         let view = TrackpadGestureView()
         view.onMove = onMove
         view.onScroll = onScroll
         view.onClick = onClick
+        view.onFourFingerSwipe = onFourFingerSwipe
         view.mouseScale = mouseScale
         view.scrollScale = scrollScale
         return view
@@ -23,6 +32,7 @@ struct TrackpadSurfaceView: UIViewRepresentable {
         uiView.onMove = onMove
         uiView.onScroll = onScroll
         uiView.onClick = onClick
+        uiView.onFourFingerSwipe = onFourFingerSwipe
         uiView.mouseScale = mouseScale
         uiView.scrollScale = scrollScale
         uiView.isNaturalScrollingEnabled = isNaturalScrollingEnabled
@@ -34,6 +44,7 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
     var onMove: ((Double, Double) -> Void)?
     var onScroll: ((Double, Double) -> Void)?
     var onClick: ((MouseButton, KeyAction) -> Void)?
+    var onFourFingerSwipe: ((TrackpadSurfaceView.SwipeDirection) -> Void)?
     var mouseScale: Double = 1.45
     var scrollScale: Double = 1.2
     var isNaturalScrollingEnabled = true
@@ -87,6 +98,30 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         threeFingerPan.delegate = self
         threeFingerPan.cancelsTouchesInView = false
 
+        let fourFingerSwipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleFourFingerSwipe(_:)))
+        fourFingerSwipeUp.numberOfTouchesRequired = 4
+        fourFingerSwipeUp.direction = .up
+        fourFingerSwipeUp.delegate = self
+        fourFingerSwipeUp.cancelsTouchesInView = false
+
+        let fourFingerSwipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleFourFingerSwipe(_:)))
+        fourFingerSwipeDown.numberOfTouchesRequired = 4
+        fourFingerSwipeDown.direction = .down
+        fourFingerSwipeDown.delegate = self
+        fourFingerSwipeDown.cancelsTouchesInView = false
+
+        let fourFingerSwipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(handleFourFingerSwipe(_:)))
+        fourFingerSwipeLeft.numberOfTouchesRequired = 4
+        fourFingerSwipeLeft.direction = .left
+        fourFingerSwipeLeft.delegate = self
+        fourFingerSwipeLeft.cancelsTouchesInView = false
+
+        let fourFingerSwipeRight = UISwipeGestureRecognizer(target: self, action: #selector(handleFourFingerSwipe(_:)))
+        fourFingerSwipeRight.numberOfTouchesRequired = 4
+        fourFingerSwipeRight.direction = .right
+        fourFingerSwipeRight.delegate = self
+        fourFingerSwipeRight.cancelsTouchesInView = false
+
         let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.numberOfTouchesRequired = 1
         singleTap.numberOfTapsRequired = 1
@@ -120,6 +155,10 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         addGestureRecognizer(oneFingerPan)
         addGestureRecognizer(twoFingerPan)
         addGestureRecognizer(threeFingerPan)
+        addGestureRecognizer(fourFingerSwipeUp)
+        addGestureRecognizer(fourFingerSwipeDown)
+        addGestureRecognizer(fourFingerSwipeLeft)
+        addGestureRecognizer(fourFingerSwipeRight)
         addGestureRecognizer(singleTap)
         addGestureRecognizer(doubleTap)
         addGestureRecognizer(twoFingerTap)
@@ -175,6 +214,23 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         default:
             break
         }
+    }
+
+    @objc private func handleFourFingerSwipe(_ recognizer: UISwipeGestureRecognizer) {
+        let direction: TrackpadSurfaceView.SwipeDirection
+        switch recognizer.direction {
+        case .up:
+            direction = .up
+        case .down:
+            direction = .down
+        case .left:
+            direction = .left
+        case .right:
+            direction = .right
+        default:
+            return
+        }
+        onFourFingerSwipe?(direction)
     }
 
     @objc private func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
