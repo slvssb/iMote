@@ -7,6 +7,27 @@ This workspace contains two SwiftUI targets:
 
 It uses local-network WebSockets, Bonjour discovery, pairing code authentication, and trusted-device sessions.
 
+## Threat Model (Current)
+
+This app is designed for personal devices on trusted networks.
+
+- Intended scope: your own Mac + your own iPhone on the same LAN/VPN.
+- Host transport: plain `ws://` on local network (no TLS in current implementation).
+- Trust boundary: pairing code + session token + optional trusted device IDs.
+- Main risk if network is untrusted: local attacker on the same network may attempt connection abuse.
+
+Current mitigations:
+
+- 6-digit rotating pairing code.
+- Session token required for privileged actions.
+- Trusted-device management controls on both Mac and iOS.
+
+Not a hardened remote administration solution yet:
+
+- No end-to-end encryption layer.
+- No mTLS / certificate pinning.
+- No enterprise IAM / policy enforcement.
+
 ## What It Does
 
 - Remote keyboard input (text, modifiers, special keys)
@@ -106,6 +127,20 @@ Notes for CLI mode:
 - iOS background execution is limited by platform policy.
 - Preview quality remains user-selectable unless thermal override is active.
 - During thermal override, host forces `Balanced` and iOS quality control is disabled until thermal recovers.
+
+## Privacy
+
+- Keyboard/mouse commands and preview frames are exchanged directly between your iPhone and Mac host over local network transport.
+- The app does not include a cloud relay/backend in the current architecture.
+- Trusted device IDs are stored locally on the host (`UserDefaults`) for auto-reconnect trust.
+- Screen preview requires macOS Screen Recording permission; input injection requires Accessibility permission.
+
+## Legal and Safety
+
+- Use only on Macs and iPhones you own or are explicitly authorized to control.
+- Do not expose the host listener to untrusted/public networks without additional hardening.
+- This project can control keyboard/mouse and stream desktop pixels; misuse can cause data/privacy harm.
+- You are responsible for complying with local laws, organizational policies, and platform terms when operating this software.
 
 ## Quick Functional Test
 
