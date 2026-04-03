@@ -56,6 +56,7 @@ struct HiddenTextInputView: UIViewRepresentable {
                 parent.onBackspace()
             }
 
+            let containsReturn = text.contains("\n")
             for character in text {
                 if character == "\n" {
                     parent.onReturn()
@@ -66,8 +67,12 @@ struct HiddenTextInputView: UIViewRepresentable {
 
             let nextText = nsCurrentText.replacingCharacters(in: effectiveRange, with: text)
             if let backspaceTextView = textView as? BackspaceTextView {
-                backspaceTextView.setPreviewText(nextText)
-                backspaceTextView.scheduleAutoClear()
+                if containsReturn && parent.activeModifiers.contains(.shift) == false {
+                    backspaceTextView.clearPreview()
+                } else {
+                    backspaceTextView.setPreviewText(nextText)
+                    backspaceTextView.scheduleAutoClear()
+                }
             }
 
             return false
@@ -140,17 +145,25 @@ struct HiddenTextInputView: UIViewRepresentable {
                 context.coordinator.parent.onBackspace()
             } else if key == .enter {
                 context.coordinator.parent.onReturn()
-                field.appendPreview("\n")
+                if context.coordinator.parent.activeModifiers.contains(.shift) {
+                    field.appendPreview("\n")
+                    field.scheduleAutoClear()
+                } else {
+                    field.clearPreview()
+                }
             } else if key == .space {
                 context.coordinator.parent.onSpecialKey(key)
                 field.appendPreview(" ")
+                field.scheduleAutoClear()
             } else {
                 context.coordinator.parent.onSpecialKey(key)
+                field.scheduleAutoClear()
             }
-            field.scheduleAutoClear()
             refocus()
         }
         accessory.updateModifierState(activeModifiers)
+
+        field.prewarmKeyboardIfNeeded()
 
         return field
     }
@@ -174,6 +187,8 @@ struct HiddenTextInputView: UIViewRepresentable {
 }
 
 final class BackspaceTextView: UITextView {
+    private static var didPrewarmKeyboard = false
+
     var backspaceWhenEmptyHandler: (() -> Void)?
     weak var keyboardToolbar: KeyboardAccessoryView?
     var lockFocus = false
@@ -233,8 +248,33 @@ final class BackspaceTextView: UITextView {
         moveCursorToEnd()
     }
 
+    func clearPreview() {
+        text = ""
+        moveCursorToEnd()
+        clearWorkItem?.cancel()
+    }
+
     func scheduleAutoClear() {
         clearWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.clearPreview()
+        }
+        clearWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: workItem)
+    }
+
+    func prewarmKeyboardIfNeeded() {
+        guard Self.didPrewarmKeyboard == false else { return }
+        Self.didPrewarmKeyboard = true
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let previousLockFocus = self.lockFocus
+            self.lockFocus = false
+            _ = self.becomeFirstResponder()
+            _ = self.resignFirstResponder()
+            self.lockFocus = previousLockFocus
+        }
     }
 }
 

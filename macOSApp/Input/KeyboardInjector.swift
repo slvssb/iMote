@@ -21,6 +21,8 @@ enum KeyboardInjectorError: LocalizedError {
 final class KeyboardInjector {
     private let mapper = KeyCodeMapper()
     private let permissionManager: AccessibilityPermissionManager
+    private var cachedDisplayBounds: CGRect = .zero
+    private var cachedDisplayBoundsTimestamp: CFAbsoluteTime = 0
 
     init(permissionManager: AccessibilityPermissionManager) {
         self.permissionManager = permissionManager
@@ -68,7 +70,8 @@ final class KeyboardInjector {
         }
 
         let current = currentEvent.location
-        let nextPoint = CGPoint(x: current.x + deltaX, y: current.y - deltaY)
+        let rawNextPoint = CGPoint(x: current.x + deltaX, y: current.y - deltaY)
+        let nextPoint = clampedPointToActiveDisplays(rawNextPoint)
         guard let moveEvent = CGEvent(
             mouseEventSource: eventSource,
             mouseType: .mouseMoved,
@@ -188,5 +191,46 @@ final class KeyboardInjector {
         keyUp.keyboardSetUnicodeString(stringLength: scalars.count, unicodeString: scalars)
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
+    }
+
+    private func clampedPointToActiveDisplays(_ point: CGPoint) -> CGPoint {
+        let bounds = activeDisplayBounds()
+        guard bounds.isNull == false, bounds.isEmpty == false else { return point }
+
+        let minX = bounds.minX
+        let maxX = bounds.maxX - 1
+        let minY = bounds.minY
+        let maxY = bounds.maxY - 1
+
+        return CGPoint(
+            x: min(max(point.x, minX), maxX),
+            y: min(max(point.y, minY), maxY)
+        )
+    }
+
+    private func activeDisplayBounds() -> CGRect {
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - cachedDisplayBoundsTimestamp < 1.0, cachedDisplayBounds.isEmpty == false {
+            return cachedDisplayBounds
+        }
+
+        var displayCount: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success, displayCount > 0 else {
+            return cachedDisplayBounds
+        }
+
+        var displayIDs = Array<CGDirectDisplayID>(repeating: 0, count: Int(displayCount))
+        guard CGGetActiveDisplayList(displayCount, &displayIDs, &displayCount) == .success else {
+            return cachedDisplayBounds
+        }
+
+        var unionBounds = CGRect.null
+        for displayID in displayIDs {
+            unionBounds = unionBounds.union(CGDisplayBounds(displayID))
+        }
+
+        cachedDisplayBounds = unionBounds
+        cachedDisplayBoundsTimestamp = now
+        return unionBounds
     }
 }
