@@ -108,13 +108,15 @@ private struct PreviewStatsStripView: View {
                 Button(action: onSettingsTapped) {
                     Image(systemName: "slider.horizontal.3")
                         .font(.headline.weight(.semibold))
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 32, alignment: .trailing)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, 12)
+                .padding(.trailing, 14)
             }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
     }
 }
 
@@ -196,6 +198,12 @@ private struct PreviewStatsStripView: View {
                 ScrollView {
                     VStack(spacing: Layout.sectionSpacing) {
                         previewControlsPanel
+                        Button("Disconnect") {
+                            viewModel.disconnect()
+                            isConfigSheetPresented = false
+                        }
+                        .buttonStyle(LiquidGlassButtonStyle(tint: .gray))
+                        .frame(maxWidth: .infinity)
                     }
                     .padding(Layout.contentPadding)
                 }
@@ -204,127 +212,135 @@ private struct PreviewStatsStripView: View {
             }
             .presentationDetents([.medium, .large])
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .ignoresSafeArea(.keyboard, edges: .all)
     }
 
     private var connectionPanel: some View {
-        LiquidGlassPanel {
-            VStack(alignment: .leading, spacing: Layout.panelSpacing) {
-                panelHeader(
-                    title: "Remote Keyboard",
-                    badge: connectionBadgeText
-                )
+        VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 8, height: 8)
+                    Text("Disconnected")
+                        .font(.title2.weight(.bold))
+                }
+                Text("Connect your iPhone to your Mac to start keyboard and trackpad control.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("Choose your Mac host and enter the 6-digit pairing code.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
-                VStack(alignment: .leading, spacing: Layout.groupSpacing) {
-                    if viewModel.isDisconnected && viewModel.isTrustedAutoReconnect == false {
-                        VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                            Text("Mac Host")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            fieldShell {
-                                Picker("Mac Host", selection: selectedServiceBinding) {
-                                    ForEach(viewModel.services) { service in
-                                        Text("\(service.name) (\(service.host))")
-                                            .tag(Optional(service))
+            VStack(alignment: .leading, spacing: Layout.statusSpacing) {
+                Text(viewModel.connectionLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(viewModel.isDisconnected ? Color.secondary : Color.orange)
+
+                if let error = viewModel.lastError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(.horizontal, Layout.fieldHorizontalPadding)
+            .padding(.vertical, Layout.fieldVerticalPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+
+            VStack(alignment: .leading, spacing: Layout.groupSpacing) {
+                VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+                    Text("Mac Host")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    fieldShell {
+                        Picker("Mac Host", selection: selectedServiceBinding) {
+                            ForEach(viewModel.services) { service in
+                                Text("\(service.name) (\(service.host))")
+                                    .tag(Optional(service))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .disabled(viewModel.services.isEmpty)
+                    }
+                    if viewModel.services.isEmpty {
+                        Text("No Mac discovered yet. Keep the macOS app open on the same Wi-Fi network.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if viewModel.isTrustedAutoReconnect == false {
+                    VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+                        Text("Pairing Code")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        fieldShell {
+                            TextField("123456", text: $viewModel.pairingCode)
+                                .focused($focusedField, equals: .pairingCode)
+                                .keyboardType(.numberPad)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .onChange(of: viewModel.pairingCode) { _, newValue in
+                                    let digitsOnly = newValue.filter(\.isNumber)
+                                    let trimmed = String(digitsOnly.prefix(6))
+                                    if viewModel.pairingCode != trimmed {
+                                        viewModel.pairingCode = trimmed
                                     }
                                 }
-                                .pickerStyle(.menu)
-                            }
+                                .onTapGesture {
+                                    isTypingCaptureActive = false
+                                }
+                                .font(.system(.body, design: .monospaced))
                         }
                     }
-
-                    if viewModel.isPaired == false && viewModel.isTrustedAutoReconnect == false {
-                        VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                            Text("Pairing Code")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            fieldShell {
-                                TextField("123456", text: $viewModel.pairingCode)
-                                    .focused($focusedField, equals: .pairingCode)
-                                    .keyboardType(.numberPad)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .onTapGesture {
-                                        isTypingCaptureActive = false
-                                    }
-                                    .font(.system(.body, design: .monospaced))
-                            }
-                        }
-                    }
-
-                    if viewModel.isTrustedAutoReconnect {
-                        Text("Trusted device: reconnecting without pairing code.")
+                } else {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.shield")
+                            .foregroundStyle(.green)
+                        Text("Trusted device detected. Pairing code is not required.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, Layout.fieldHorizontalPadding)
-                            .padding(.vertical, Layout.fieldVerticalPadding)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
                     }
-
-                    if viewModel.hasTrustedSessionLocally {
-                        VStack(alignment: .leading, spacing: Layout.controlSpacing) {
-                            Text("Trusted Device")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-
-                            HStack(spacing: Layout.controlSpacing) {
-                                Button("Forget on Phone") {
-                                    viewModel.forgetTrustedSessionOnPhone()
-                                }
-                                .buttonStyle(LiquidGlassButtonStyle(tint: .gray))
-                                .frame(maxWidth: .infinity)
-
-                                Button("Forget on Mac") {
-                                    viewModel.forgetCurrentDeviceTrustOnMac()
-                                }
-                                .buttonStyle(LiquidGlassButtonStyle(tint: .orange))
-                                .frame(maxWidth: .infinity)
-                                .disabled(viewModel.isPaired == false)
-                            }
-                        }
-                    }
+                    .padding(.horizontal, Layout.fieldHorizontalPadding)
+                    .padding(.vertical, Layout.fieldVerticalPadding)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
                 }
+            }
 
-                HStack(spacing: Layout.controlSpacing) {
-                    if viewModel.isPaired {
-                        Button("Disconnect") {
-                            viewModel.disconnect()
-                        }
-                        .buttonStyle(LiquidGlassButtonStyle(tint: .gray))
-                        .frame(maxWidth: .infinity)
-                    } else {
-                        Button("Connect") {
-                            viewModel.connect()
-                        }
-                        .buttonStyle(LiquidGlassButtonStyle(tint: .blue))
-                        .frame(maxWidth: .infinity)
+            Button(connectButtonTitle) {
+                viewModel.connect()
+            }
+            .buttonStyle(LiquidGlassButtonStyle(tint: .blue))
+            .frame(maxWidth: .infinity)
+            .disabled(canConnect == false)
 
-                        Button("Disconnect") {
-                            viewModel.disconnect()
-                        }
-                        .buttonStyle(LiquidGlassButtonStyle(tint: .gray))
-                        .frame(maxWidth: .infinity)
+            if canConnect == false {
+                Text(connectDisabledReason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if viewModel.hasTrustedSessionLocally {
+                HStack(spacing: 12) {
+                    Text("Trusted session saved on iPhone")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("Forget") {
+                        viewModel.forgetTrustedSessionOnPhone()
                     }
-                }
-
-                VStack(alignment: .leading, spacing: Layout.statusSpacing) {
-                    Text(viewModel.connectionLabel)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(viewModel.isPaired ? Color.green : Color.secondary)
-
-                    if let error = viewModel.lastError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
+                    .font(.footnote.weight(.semibold))
                 }
                 .padding(.horizontal, Layout.fieldHorizontalPadding)
                 .padding(.vertical, Layout.fieldVerticalPadding)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var fixedScreenPreview: some View {
@@ -593,5 +609,35 @@ private struct PreviewStatsStripView: View {
             get: { viewModel.selectedService },
             set: { viewModel.selectedService = $0 }
         )
+    }
+
+    private var connectButtonTitle: String {
+        viewModel.isConnecting ? "Connecting…" : "Connect to Mac"
+    }
+
+    private var canConnect: Bool {
+        if viewModel.isConnecting {
+            return false
+        }
+        guard viewModel.selectedService != nil else {
+            return false
+        }
+        if viewModel.isTrustedAutoReconnect {
+            return true
+        }
+        return viewModel.pairingCode.count == 6
+    }
+
+    private var connectDisabledReason: String {
+        if viewModel.isConnecting {
+            return "Connecting to your Mac..."
+        }
+        if viewModel.selectedService == nil {
+            return "Select a Mac host to continue."
+        }
+        if viewModel.isTrustedAutoReconnect == false && viewModel.pairingCode.count != 6 {
+            return "Enter the 6-digit pairing code."
+        }
+        return ""
     }
 }

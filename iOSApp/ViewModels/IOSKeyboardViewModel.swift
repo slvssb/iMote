@@ -30,6 +30,13 @@ final class IOSKeyboardViewModel: ObservableObject {
         return false
     }
 
+    var isConnecting: Bool {
+        if case .connecting = client.state {
+            return true
+        }
+        return false
+    }
+
     var isPaired: Bool {
         if case .paired = client.state {
             return true
