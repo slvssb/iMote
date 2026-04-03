@@ -93,6 +93,12 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         singleTap.delegate = self
         singleTap.cancelsTouchesInView = false
 
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        doubleTap.numberOfTouchesRequired = 1
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.delegate = self
+        doubleTap.cancelsTouchesInView = false
+
         let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
         twoFingerTap.numberOfTouchesRequired = 2
         twoFingerTap.numberOfTapsRequired = 1
@@ -105,7 +111,9 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         threeFingerTap.delegate = self
         threeFingerTap.cancelsTouchesInView = false
 
+        singleTap.require(toFail: doubleTap)
         singleTap.require(toFail: oneFingerPan)
+        doubleTap.require(toFail: oneFingerPan)
         twoFingerTap.require(toFail: twoFingerPan)
         threeFingerTap.require(toFail: threeFingerPan)
 
@@ -113,6 +121,7 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         addGestureRecognizer(twoFingerPan)
         addGestureRecognizer(threeFingerPan)
         addGestureRecognizer(singleTap)
+        addGestureRecognizer(doubleTap)
         addGestureRecognizer(twoFingerTap)
         addGestureRecognizer(threeFingerTap)
     }
@@ -171,6 +180,14 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
     @objc private func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended {
             triggerClickHaptic(for: .left)
+            onClick?(.left, .tap)
+        }
+    }
+
+    @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+        if recognizer.state == .ended {
+            triggerClickHaptic(for: .left)
+            onClick?(.left, .tap)
             onClick?(.left, .tap)
         }
     }

@@ -23,6 +23,10 @@ final class KeyboardInjector {
     private let permissionManager: AccessibilityPermissionManager
     private var cachedDisplayBounds: CGRect = .zero
     private var cachedDisplayBoundsTimestamp: CFAbsoluteTime = 0
+    private var lastMouseTapTime: CFAbsoluteTime = 0
+    private var lastMouseTapLocation: CGPoint = .zero
+    private var lastMouseTapButton: MouseButton?
+    private var lastMouseTapClickCount: Int64 = 0
 
     init(permissionManager: AccessibilityPermissionManager) {
         self.permissionManager = permissionManager
@@ -117,12 +121,13 @@ final class KeyboardInjector {
 
         switch action {
         case .down:
-            try postMouseEvent(source: eventSource, type: downType, point: cursor, button: mappedButton)
+            try postMouseEvent(source: eventSource, type: downType, point: cursor, button: mappedButton, clickState: 1)
         case .up:
-            try postMouseEvent(source: eventSource, type: upType, point: cursor, button: mappedButton)
+            try postMouseEvent(source: eventSource, type: upType, point: cursor, button: mappedButton, clickState: 1)
         case .tap:
-            try postMouseEvent(source: eventSource, type: downType, point: cursor, button: mappedButton)
-            try postMouseEvent(source: eventSource, type: upType, point: cursor, button: mappedButton)
+            let clickState = nextClickState(for: button, at: cursor)
+            try postMouseEvent(source: eventSource, type: downType, point: cursor, button: mappedButton, clickState: clickState)
+            try postMouseEvent(source: eventSource, type: upType, point: cursor, button: mappedButton, clickState: clickState)
         }
     }
 
@@ -157,7 +162,13 @@ final class KeyboardInjector {
         event.post(tap: .cghidEventTap)
     }
 
-    private func postMouseEvent(source: CGEventSource, type: CGEventType, point: CGPoint, button: CGMouseButton) throws {
+    private func postMouseEvent(
+        source: CGEventSource,
+        type: CGEventType,
+        point: CGPoint,
+        button: CGMouseButton,
+        clickState: Int64
+    ) throws {
         guard let event = CGEvent(
             mouseEventSource: source,
             mouseType: type,
@@ -167,7 +178,29 @@ final class KeyboardInjector {
             throw KeyboardInjectorError.eventBuildFailed
         }
 
+        event.setIntegerValueField(.mouseEventClickState, value: clickState)
         event.post(tap: .cghidEventTap)
+    }
+
+    private func nextClickState(for button: MouseButton, at point: CGPoint) -> Int64 {
+        let now = CFAbsoluteTimeGetCurrent()
+        let maxInterval: CFAbsoluteTime = 0.40
+        let maxDistance: CGFloat = 6
+
+        let isSameButton = (lastMouseTapButton == button)
+        let isWithinInterval = (now - lastMouseTapTime) <= maxInterval
+        let isWithinDistance = hypot(point.x - lastMouseTapLocation.x, point.y - lastMouseTapLocation.y) <= maxDistance
+
+        if isSameButton, isWithinInterval, isWithinDistance {
+            lastMouseTapClickCount = min(lastMouseTapClickCount + 1, 3)
+        } else {
+            lastMouseTapClickCount = 1
+        }
+
+        lastMouseTapButton = button
+        lastMouseTapLocation = point
+        lastMouseTapTime = now
+        return lastMouseTapClickCount
     }
 
     private func normalizedScrollDelta(_ value: Double) -> Int32 {
