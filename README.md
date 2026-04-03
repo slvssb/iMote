@@ -66,6 +66,27 @@ xcodebuild -project iPhoneKeyboard.xcodeproj -scheme iPhoneKeyboard-Mac -configu
    - tap `Connect`
 7. Tap the typing area and type. Text and key events should appear immediately on macOS.
 
+## CLI Host Mode (Remote Mac)
+
+You can run the mac host directly from terminal:
+
+```bash
+/Applications/iPhoneKeyboard-Mac.app/Contents/MacOS/iPhoneKeyboard-Mac --cli --port 8989
+```
+
+CLI flags:
+
+- `--cli`: run listener headlessly in terminal
+- `--port <number>`: custom listener port (default `8989`)
+- `--help`: print CLI usage
+
+In CLI mode the host prints:
+
+- current listener state
+- pairing code + expiry
+- accessibility status
+- connected device names
+
 ## Notes
 
 - Host listens on port `8989` and advertises service type `_rkbd._tcp`.

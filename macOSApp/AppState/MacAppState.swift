@@ -18,12 +18,14 @@ final class MacAppState: ObservableObject {
 
     private var timerCancellable: AnyCancellable?
 
-    init() {
+    init(autoStart: Bool = true) {
         bindServerCallbacks()
         refreshAccessibility(prompt: false)
-        startServer()
-        startPairingTicker()
-        refreshPairingSnapshot()
+        if autoStart {
+            startServer()
+            startPairingTicker()
+            refreshPairingSnapshot()
+        }
     }
 
     func startServer() {
