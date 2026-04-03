@@ -47,16 +47,29 @@ struct HiddenTextInputView: UIViewRepresentable {
                 return false
             }
 
+            let trailingWord = trailingWordAtTail(in: currentText)
+            let suggestionStem = suggestionLeadingWord(in: text)
+
+            if shouldSkipRepeatedSuggestionInsert(
+                range: range,
+                replacementText: text,
+                trailingWord: trailingWord,
+                suggestionStem: suggestionStem,
+                touchesTail: touchesTail
+            ) {
+                return false
+            }
+
             var effectiveRange = range
-            if range.length == 0, text.count > 1 {
-                let trailingWord = trailingWordAtTail(in: currentText)
-                if trailingWord.isEmpty == false,
-                   text.hasPrefix(trailingWord) {
-                    effectiveRange = NSRange(
-                        location: nsCurrentText.length - trailingWord.utf16.count,
-                        length: trailingWord.utf16.count
-                    )
-                }
+            if suggestionCanReplaceTrailingWord(
+                trailingWord: trailingWord,
+                suggestionStem: suggestionStem,
+                touchesTail: touchesTail
+            ) {
+                effectiveRange = NSRange(
+                    location: nsCurrentText.length - trailingWord.utf16.count,
+                    length: trailingWord.utf16.count
+                )
             }
 
             for _ in 0..<effectiveRange.length {
@@ -95,6 +108,43 @@ struct HiddenTextInputView: UIViewRepresentable {
             }
 
             return isDuplicate
+        }
+
+        private func shouldSkipRepeatedSuggestionInsert(
+            range: NSRange,
+            replacementText: String,
+            trailingWord: String,
+            suggestionStem: String,
+            touchesTail: Bool
+        ) -> Bool {
+            guard touchesTail, range.length == 0, replacementText.count > 1 else { return false }
+            guard trailingWord.isEmpty == false, suggestionStem.isEmpty == false else { return false }
+            return trailingWord.caseInsensitiveCompare(suggestionStem) == .orderedSame
+        }
+
+        private func suggestionCanReplaceTrailingWord(
+            trailingWord: String,
+            suggestionStem: String,
+            touchesTail: Bool
+        ) -> Bool {
+            guard touchesTail, trailingWord.isEmpty == false, suggestionStem.isEmpty == false else {
+                return false
+            }
+            return suggestionStem.lowercased().hasPrefix(trailingWord.lowercased())
+        }
+
+        private func suggestionLeadingWord(in replacementText: String) -> String {
+            let trimmed = replacementText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty == false else { return "" }
+
+            var collected: [Character] = []
+            for character in trimmed {
+                if character.isWhitespace || character == "\n" {
+                    break
+                }
+                collected.append(character)
+            }
+            return String(collected)
         }
 
         private func trailingWordAtTail(in value: String) -> String {
