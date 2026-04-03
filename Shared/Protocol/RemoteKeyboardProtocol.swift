@@ -11,6 +11,7 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case cursorPosition
     case streamConfig
     case screenFrame
+    case streamStats
     case ping
     case pong
     case error
@@ -40,6 +41,11 @@ public enum PreviewQualityMode: String, Codable, CaseIterable, Sendable {
     case ultra
 }
 
+public enum PreviewVideoCodec: String, Codable, CaseIterable, Sendable {
+    case hevc
+    case h264
+}
+
 public struct RemoteMessage: Codable, Sendable {
     public var type: RemoteMessageType
     public var value: String?
@@ -60,7 +66,9 @@ public struct RemoteMessage: Codable, Sendable {
     public var cursorY: Double?
     public var button: MouseButton?
     public var qualityMode: PreviewQualityMode?
+    public var videoCodec: PreviewVideoCodec?
     public var frameBase64: String?
+    public var bitrateKbps: Int?
 
     public init(
         type: RemoteMessageType,
@@ -82,7 +90,9 @@ public struct RemoteMessage: Codable, Sendable {
         cursorY: Double? = nil,
         button: MouseButton? = nil,
         qualityMode: PreviewQualityMode? = nil,
-        frameBase64: String? = nil
+        videoCodec: PreviewVideoCodec? = nil,
+        frameBase64: String? = nil,
+        bitrateKbps: Int? = nil
     ) {
         self.type = type
         self.value = value
@@ -103,7 +113,9 @@ public struct RemoteMessage: Codable, Sendable {
         self.cursorY = cursorY
         self.button = button
         self.qualityMode = qualityMode
+        self.videoCodec = videoCodec
         self.frameBase64 = frameBase64
+        self.bitrateKbps = bitrateKbps
     }
 
     public static func pair(code: String, deviceName: String, deviceID: String?) -> RemoteMessage {
@@ -143,12 +155,20 @@ public struct RemoteMessage: Codable, Sendable {
         RemoteMessage(type: .cursorPosition, cursorX: x, cursorY: y)
     }
 
-    public static func streamConfig(qualityMode: PreviewQualityMode, token: String?) -> RemoteMessage {
-        RemoteMessage(type: .streamConfig, token: token, qualityMode: qualityMode)
+    public static func streamConfig(
+        qualityMode: PreviewQualityMode,
+        videoCodec: PreviewVideoCodec,
+        token: String?
+    ) -> RemoteMessage {
+        RemoteMessage(type: .streamConfig, token: token, qualityMode: qualityMode, videoCodec: videoCodec)
     }
 
     public static func screenFrame(frameBase64: String) -> RemoteMessage {
         RemoteMessage(type: .screenFrame, frameBase64: frameBase64)
+    }
+
+    public static func streamStats(bitrateKbps: Int) -> RemoteMessage {
+        RemoteMessage(type: .streamStats, bitrateKbps: bitrateKbps)
     }
 
     public static func error(_ reason: String) -> RemoteMessage {

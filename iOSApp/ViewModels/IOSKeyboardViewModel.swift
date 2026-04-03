@@ -10,6 +10,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     @Published var lastError: String?
     @Published var connectionLabel = "Disconnected"
     @Published var previewQualityMode: PreviewQualityMode = .ultra
+    @Published var previewCodec: PreviewVideoCodec = .hevc
 
     let screenPreview = ScreenPreviewState()
 
@@ -91,7 +92,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                 case .paired:
                     self.connectionLabel = "Paired and ready"
                     self.hasTrustedSession = true
-                    self.client.sendStreamConfig(qualityMode: self.previewQualityMode)
+                    self.client.sendStreamConfig(qualityMode: self.previewQualityMode, videoCodec: self.previewCodec)
                 case let .failed(reason):
                     self.connectionLabel = "Failed"
                     self.lastError = reason
@@ -143,6 +144,11 @@ final class IOSKeyboardViewModel: ObservableObject {
         client.onVideoCodecChanged = { [weak self] codecLabel in
             guard let self else { return }
             self.screenPreview.updateVideoCodecLabel(codecLabel)
+        }
+
+        client.onEncoderBitrateChanged = { [weak self] bitrateKbps in
+            guard let self else { return }
+            self.screenPreview.updateEncoderBitrate(kbps: bitrateKbps)
         }
     }
 
@@ -235,7 +241,13 @@ final class IOSKeyboardViewModel: ObservableObject {
     func setPreviewQualityMode(_ mode: PreviewQualityMode) {
         guard previewQualityMode != mode else { return }
         previewQualityMode = mode
-        client.sendStreamConfig(qualityMode: mode)
+        client.sendStreamConfig(qualityMode: mode, videoCodec: previewCodec)
+    }
+
+    func setPreviewCodec(_ codec: PreviewVideoCodec) {
+        guard previewCodec != codec else { return }
+        previewCodec = codec
+        client.sendStreamConfig(qualityMode: previewQualityMode, videoCodec: codec)
     }
 
     private func shiftedBaseKey(for character: Character) -> String? {

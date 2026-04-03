@@ -20,6 +20,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onH264Config: ((Data) -> Void)?
     var onH264Frame: ((Data) -> Void)?
     var onVideoCodecChanged: ((String) -> Void)?
+    var onEncoderBitrateChanged: ((Int) -> Void)?
 
     private var session: URLSession!
     private var task: URLSessionWebSocketTask?
@@ -102,8 +103,8 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(RemoteMessage.mouseScroll(scrollX: scrollX, scrollY: scrollY, token: pairedToken))
     }
 
-    func sendStreamConfig(qualityMode: PreviewQualityMode) {
-        sendMessage(RemoteMessage.streamConfig(qualityMode: qualityMode, token: pairedToken))
+    func sendStreamConfig(qualityMode: PreviewQualityMode, videoCodec: PreviewVideoCodec) {
+        sendMessage(RemoteMessage.streamConfig(qualityMode: qualityMode, videoCodec: videoCodec, token: pairedToken))
     }
 
     private func sendPairing(code: String) {
@@ -189,6 +190,10 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                 }
             case .pong:
                 break
+            case .streamStats:
+                if let bitrateKbps = decoded.bitrateKbps {
+                    onEncoderBitrateChanged?(bitrateKbps)
+                }
             default:
                 break
             }

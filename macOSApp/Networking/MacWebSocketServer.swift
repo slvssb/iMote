@@ -35,11 +35,13 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var isFrameCaptureInFlight = false
     private var consecutiveFrameFailures = 0
     private var previewQualityMode: PreviewQualityMode = .ultra
+    private var previewVideoCodec: PreviewVideoCodec = .hevc
     private var previewCaptureMaxWidth: CGFloat = 1920
     private var adaptiveBitrateScale: Double = 1.0
     private var adaptiveWindowTickCount = 0
     private var adaptiveWindowSkippedCount = 0
     private var adaptiveWindowEncodedCount = 0
+    private var lastEncodedFrameUptimeNanos: UInt64 = 0
 
     init(pairingManager: PairingManager, injector: KeyboardInjector) {
         self.pairingManager = pairingManager
@@ -53,6 +55,20 @@ final class MacWebSocketServer: @unchecked Sendable {
                 }
                 for id in pairedClientIDs {
                     self.sendBinaryFrame(packet, to: id)
+                }
+            }
+        }
+
+        h264Encoder.onBitrateChanged = { [weak self] bitrateKbps in
+            guard let self else { return }
+            self.queue.async {
+                let pairedClientIDs = self.clients.compactMap { id, context in
+                    context.token == nil ? nil : id
+                }
+                guard pairedClientIDs.isEmpty == false else { return }
+                let statsMessage = RemoteMessage.streamStats(bitrateKbps: bitrateKbps)
+                for id in pairedClientIDs {
+                    self.send(statsMessage, to: id)
                 }
             }
         }
@@ -310,16 +326,21 @@ final class MacWebSocketServer: @unchecked Sendable {
             return
         }
 
-        guard let mode = message.qualityMode else { return }
-        previewQualityMode = mode
+        if let mode = message.qualityMode {
+            previewQualityMode = mode
+            switch mode {
+            case .balanced:
+                previewCaptureMaxWidth = 1440
+                h264Encoder.setQualityProfile(.balanced)
+            case .ultra:
+                previewCaptureMaxWidth = 1920
+                h264Encoder.setQualityProfile(.ultra)
+            }
+        }
 
-        switch mode {
-        case .balanced:
-            previewCaptureMaxWidth = 1440
-            h264Encoder.setQualityProfile(.balanced)
-        case .ultra:
-            previewCaptureMaxWidth = 1920
-            h264Encoder.setQualityProfile(.ultra)
+        if let codec = message.videoCodec {
+            previewVideoCodec = codec
+            h264Encoder.setPreferredCodec(codec)
         }
     }
 
@@ -377,6 +398,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         adaptiveWindowTickCount = 0
         adaptiveWindowSkippedCount = 0
         adaptiveWindowEncodedCount = 0
+        lastEncodedFrameUptimeNanos = 0
         h264Encoder.setAdaptiveBitrateScale(adaptiveBitrateScale)
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -403,6 +425,13 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         guard pairedClientIDs.isEmpty == false else { return }
         adaptiveWindowTickCount += 1
+        let nowUptimeNanos = DispatchTime.now().uptimeNanoseconds
+        if lastEncodedFrameUptimeNanos != 0,
+           nowUptimeNanos - lastEncodedFrameUptimeNanos < Self.frameIntervalNanos {
+            adaptiveWindowSkippedCount += 1
+            updateAdaptiveBitrateIfNeeded()
+            return
+        }
         guard isFrameCaptureInFlight == false else {
             adaptiveWindowSkippedCount += 1
             updateAdaptiveBitrateIfNeeded()
@@ -438,6 +467,7 @@ final class MacWebSocketServer: @unchecked Sendable {
                 }
 
                 self.consecutiveFrameFailures = 0
+                self.lastEncodedFrameUptimeNanos = DispatchTime.now().uptimeNanoseconds
                 self.h264Encoder.encode(pixelBuffer: framePixelBuffer.value)
                 self.adaptiveWindowEncodedCount += 1
                 self.updateAdaptiveBitrateIfNeeded()

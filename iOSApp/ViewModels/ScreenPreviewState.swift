@@ -18,6 +18,7 @@ final class ScreenPreviewState: ObservableObject {
     private var smoothedFPS: Double?
     private var displayedFPS: Int?
     private var smoothedDecodeLatencyMs: Double?
+    private var smoothedBitrateKbps: Double?
     private var videoCodecLabel: String?
     private var timerCancellable: AnyCancellable?
 
@@ -38,6 +39,7 @@ final class ScreenPreviewState: ObservableObject {
         smoothedFPS = nil
         displayedFPS = nil
         smoothedDecodeLatencyMs = nil
+        smoothedBitrateKbps = nil
         videoCodecLabel = nil
         displayBridge.flush()
     }
@@ -91,6 +93,16 @@ final class ScreenPreviewState: ObservableObject {
         updateStatsLabel()
     }
 
+    func updateEncoderBitrate(kbps: Int) {
+        let value = Double(max(0, kbps))
+        if let current = smoothedBitrateKbps {
+            smoothedBitrateKbps = (current * 0.75) + (value * 0.25)
+        } else {
+            smoothedBitrateKbps = value
+        }
+        updateStatsLabel()
+    }
+
     private func recordArrival() {
         let now = Date()
         frameTimestamps.append(now)
@@ -116,7 +128,7 @@ final class ScreenPreviewState: ObservableObject {
             smoothedFPS = instantFPS
         }
 
-        let candidateFPS = Int((smoothedFPS ?? instantFPS).rounded())
+        let candidateFPS = min(60, Int((smoothedFPS ?? instantFPS).rounded()))
         if let currentDisplayed = displayedFPS {
             // Avoid visual churn for tiny FPS fluctuations (e.g. 60 <-> 61).
             if abs(candidateFPS - currentDisplayed) >= 3 {
@@ -131,6 +143,13 @@ final class ScreenPreviewState: ObservableObject {
         let decodeMs = Int((smoothedDecodeLatencyMs ?? 0).rounded())
 
         var label = "~\(fps) fps • decode \(decodeMs) ms • render \(ageMs) ms"
+        if let smoothedBitrateKbps {
+            if smoothedBitrateKbps >= 1000 {
+                label += String(format: " • bitrate %.1f Mbps", smoothedBitrateKbps / 1000)
+            } else {
+                label += " • bitrate \(Int(smoothedBitrateKbps.rounded())) Kbps"
+            }
+        }
         if let videoCodecLabel {
             label += " • codec \(videoCodecLabel)"
         }

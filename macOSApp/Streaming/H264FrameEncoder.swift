@@ -24,26 +24,38 @@ final class H264FrameEncoder: @unchecked Sendable {
     private static let maxAdaptiveScale = 1.0
 
     struct QualityProfile: @unchecked Sendable {
-        let profileLevel: CFString
-        let bitsPerPixel: Double
-        let minBitrate: Int
-        let maxBitrate: Int
-        let keyframeInterval: Int
+        let h264ProfileLevel: CFString
+        let h264BitsPerPixel: Double
+        let h264MinBitrate: Int
+        let h264MaxBitrate: Int
+        let h264KeyframeInterval: Int
+        let hevcBitsPerPixel: Double
+        let hevcMinBitrate: Int
+        let hevcMaxBitrate: Int
+        let hevcKeyframeInterval: Int
 
         static let balanced = QualityProfile(
-            profileLevel: kVTProfileLevel_H264_Main_AutoLevel,
-            bitsPerPixel: 0.14,
-            minBitrate: 8_000_000,
-            maxBitrate: 20_000_000,
-            keyframeInterval: 45
+            h264ProfileLevel: kVTProfileLevel_H264_Main_AutoLevel,
+            h264BitsPerPixel: 0.14,
+            h264MinBitrate: 8_000_000,
+            h264MaxBitrate: 20_000_000,
+            h264KeyframeInterval: 45,
+            hevcBitsPerPixel: 0.13,
+            hevcMinBitrate: 8_000_000,
+            hevcMaxBitrate: 20_000_000,
+            hevcKeyframeInterval: 60
         )
 
         static let ultra = QualityProfile(
-            profileLevel: kVTProfileLevel_H264_High_AutoLevel,
-            bitsPerPixel: 0.23,
-            minBitrate: 12_000_000,
-            maxBitrate: 35_000_000,
-            keyframeInterval: 30
+            h264ProfileLevel: kVTProfileLevel_H264_High_AutoLevel,
+            h264BitsPerPixel: 0.23,
+            h264MinBitrate: 12_000_000,
+            h264MaxBitrate: 35_000_000,
+            h264KeyframeInterval: 30,
+            hevcBitsPerPixel: 0.2,
+            hevcMinBitrate: 12_000_000,
+            hevcMaxBitrate: 35_000_000,
+            hevcKeyframeInterval: 45
         )
     }
 
@@ -53,6 +65,7 @@ final class H264FrameEncoder: @unchecked Sendable {
     static let hevcFrameMarker: UInt8 = 0x13
 
     var onPacket: ((Data) -> Void)?
+    var onBitrateChanged: ((Int) -> Void)?
 
     private var compressionSession: VTCompressionSession?
     private var width: Int32 = 0
@@ -61,7 +74,9 @@ final class H264FrameEncoder: @unchecked Sendable {
     private var didSendConfig = false
     private var qualityProfile: QualityProfile = .ultra
     private var adaptiveBitrateScale: Double = 1.0
+    private var preferredCodec: PreviewVideoCodec = .hevc
     private var currentCodec: VideoCodec = .hevc
+    private var lastPublishedBitrate: Int?
 
     private let queue = DispatchQueue(label: "remote.keyboard.h264.encoder")
 
@@ -109,6 +124,16 @@ final class H264FrameEncoder: @unchecked Sendable {
                 return
             }
             self.applyBitrate(to: session, width: self.width, height: self.height)
+        }
+    }
+
+    func setPreferredCodec(_ codec: PreviewVideoCodec) {
+        queue.async {
+            guard self.preferredCodec != codec else { return }
+            self.preferredCodec = codec
+            if self.width > 0, self.height > 0 {
+                self.recreateSession(width: self.width, height: self.height)
+            }
         }
     }
 
@@ -182,7 +207,6 @@ final class H264FrameEncoder: @unchecked Sendable {
             kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: true
         ]
 
-        let preferredCodec: VideoCodec = .hevc
         let preferredCodecType: CMVideoCodecType = preferredCodec == .hevc ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
 
         var status = VTCompressionSessionCreate(
@@ -213,7 +237,7 @@ final class H264FrameEncoder: @unchecked Sendable {
             )
             currentCodec = .h264
         } else {
-            currentCodec = preferredCodec
+            currentCodec = preferredCodec == .hevc ? .hevc : .h264
         }
 
         guard status == noErr, let session else {
@@ -224,7 +248,7 @@ final class H264FrameEncoder: @unchecked Sendable {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowTemporalCompression, value: kCFBooleanTrue)
         if currentCodec == .h264 {
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: qualityProfile.profileLevel)
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: qualityProfile.h264ProfileLevel)
             VTSessionSetProperty(session, key: kVTCompressionPropertyKey_H264EntropyMode, value: kVTH264EntropyMode_CABAC)
         } else {
             VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_HEVC_Main_AutoLevel)
@@ -235,8 +259,8 @@ final class H264FrameEncoder: @unchecked Sendable {
 
         applyBitrate(to: session, width: width, height: height)
 
-        let keyframeInterval = qualityProfile.keyframeInterval as CFTypeRef
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyframeInterval)
+        let keyframeInterval: Int = currentCodec == .hevc ? qualityProfile.hevcKeyframeInterval : qualityProfile.h264KeyframeInterval
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyframeInterval as CFTypeRef)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 1 as CFTypeRef)
 
         VTCompressionSessionPrepareToEncodeFrames(session)
@@ -244,16 +268,33 @@ final class H264FrameEncoder: @unchecked Sendable {
     }
 
     private func targetBitrate(width: Int32, height: Int32, fps: Int) -> Int {
+        let bitsPerPixel: Double
+        let minBitrate: Int
+        let maxBitrate: Int
+        if currentCodec == .hevc {
+            bitsPerPixel = qualityProfile.hevcBitsPerPixel
+            minBitrate = qualityProfile.hevcMinBitrate
+            maxBitrate = qualityProfile.hevcMaxBitrate
+        } else {
+            bitsPerPixel = qualityProfile.h264BitsPerPixel
+            minBitrate = qualityProfile.h264MinBitrate
+            maxBitrate = qualityProfile.h264MaxBitrate
+        }
+
         let pixelRate = Int(width * height) * fps
-        let estimated = Int(Double(pixelRate) * qualityProfile.bitsPerPixel)
-        let clamped = min(max(estimated, qualityProfile.minBitrate), qualityProfile.maxBitrate)
+        let estimated = Int(Double(pixelRate) * bitsPerPixel)
+        let clamped = min(max(estimated, minBitrate), maxBitrate)
         let scaled = Int(Double(clamped) * adaptiveBitrateScale)
-        return min(max(scaled, qualityProfile.minBitrate / 2), qualityProfile.maxBitrate)
+        return min(max(scaled, minBitrate / 2), maxBitrate)
     }
 
     private func applyBitrate(to session: VTCompressionSession, width: Int32, height: Int32) {
         let bitrate = targetBitrate(width: width, height: height, fps: Self.targetFPS)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFTypeRef)
+        if lastPublishedBitrate != bitrate {
+            lastPublishedBitrate = bitrate
+            onBitrateChanged?(max(1, bitrate / 1_000))
+        }
     }
 
     private func makePixelBuffer(from cgImage: CGImage) -> CVPixelBuffer? {
