@@ -57,17 +57,19 @@ struct RemoteKeyboardMacApp: App {
     }
 
     var body: some Scene {
-        if launchOptions.cliMode {
-            Settings {
-                EmptyView()
-            }
-        } else {
-            MenuBarExtra("iPhone Keyboard Host", systemImage: "keyboard") {
-                MenuBarMenuView(appState: appState)
-            }
-            .menuBarExtraStyle(.window)
+        MenuBarExtra(
+            "iPhone Keyboard Host",
+            systemImage: "keyboard",
+            isInserted: .constant(launchOptions.cliMode == false)
+        ) {
+            MenuBarMenuView(appState: appState)
+        }
+        .menuBarExtraStyle(.window)
 
-            Settings {
+        Settings {
+            if launchOptions.cliMode {
+                EmptyView()
+            } else {
                 VStack {
                     Text("iPhone Keyboard Host runs in the menu bar.")
                         .padding()
