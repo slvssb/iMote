@@ -163,7 +163,11 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                     state = .paired
                     startPing()
                 } else {
-                    state = .failed(decoded.reason ?? "Pairing failed")
+                    let reason = decoded.reason ?? "Pairing failed"
+                    // Stop reconnect loops when pairing is rejected.
+                    shouldReconnect = false
+                    state = .failed(reason)
+                    task?.cancel(with: .normalClosure, reason: nil)
                 }
             case .error:
                 let reason = decoded.reason ?? "Unknown error"

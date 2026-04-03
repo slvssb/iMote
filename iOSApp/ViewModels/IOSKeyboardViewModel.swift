@@ -100,6 +100,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                        self.pairingCode.isEmpty,
                        reason.localizedCaseInsensitiveContains("invalid pairing code") {
                         self.hasTrustedSession = false
+                        self.client.disconnect(userInitiated: true)
                     }
                 }
             }
