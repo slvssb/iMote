@@ -269,9 +269,6 @@ private struct MacStartupOverlay: View {
                 resetStartupSequence()
             }
         }
-        .onChange(of: viewModel.screenPreview.hasFrame) { _, _ in
-            dismissStartupOverlayIfReady()
-        }
         .sheet(isPresented: $isConfigSheetPresented) {
             NavigationStack {
                 ScrollView {
@@ -471,6 +468,10 @@ private struct MacStartupOverlay: View {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard Task.isCancelled == false else { return }
             hasSatisfiedStartupMinimum = true
+            while viewModel.screenPreview.hasFrame == false {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                guard Task.isCancelled == false else { return }
+            }
             dismissStartupOverlayIfReady()
         }
     }
