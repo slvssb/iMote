@@ -21,7 +21,6 @@ enum KeyboardInjectorError: LocalizedError {
 final class KeyboardInjector {
     private let mapper = KeyCodeMapper()
     private let permissionManager: AccessibilityPermissionManager
-    private var pointerProfile: PointerProfile = .edgeAssist
     private var cachedDisplayBounds: CGRect = .zero
     private var cachedDisplayBoundsTimestamp: CFAbsoluteTime = 0
 
@@ -58,10 +57,6 @@ final class KeyboardInjector {
             try postKeyEvent(keyCode: keyCode, keyDown: true, flags: flags)
             try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
         }
-    }
-
-    func setPointerProfile(_ profile: PointerProfile) {
-        pointerProfile = profile
     }
 
     func injectMouseMove(deltaX: Double, deltaY: Double) throws {
@@ -200,9 +195,6 @@ final class KeyboardInjector {
     }
 
     private func adjustedEdgeAwareDelta(from current: CGPoint, deltaX: Double, deltaY: Double) -> CGPoint {
-        guard pointerProfile == .edgeAssist else {
-            return CGPoint(x: deltaX, y: deltaY)
-        }
         let bounds = activeDisplayBounds()
         guard bounds.isNull == false, bounds.isEmpty == false else {
             return CGPoint(x: deltaX, y: deltaY)

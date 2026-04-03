@@ -35,17 +35,11 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var isFrameCaptureInFlight = false
     private var consecutiveFrameFailures = 0
     private var previewQualityMode: PreviewQualityMode = .ultra
-    private var previewBaseCaptureMaxWidth: CGFloat = 1920
     private var previewCaptureMaxWidth: CGFloat = 1920
-    private var pointerProfile: PointerProfile = .edgeAssist
     private var adaptiveBitrateScale: Double = 1.0
-    private var adaptiveResolutionLevels: [CGFloat] = [1.0, 0.85, 0.7, 0.58]
-    private var adaptiveResolutionIndex = 0
     private var adaptiveWindowTickCount = 0
     private var adaptiveWindowSkippedCount = 0
     private var adaptiveWindowEncodedCount = 0
-    private var lastAdaptiveSkipRatio: Double = 0
-    private var telemetryTickCount = 0
 
     init(pairingManager: PairingManager, injector: KeyboardInjector) {
         self.pairingManager = pairingManager
@@ -316,25 +310,16 @@ final class MacWebSocketServer: @unchecked Sendable {
             return
         }
 
-        if let mode = message.qualityMode {
-            previewQualityMode = mode
+        guard let mode = message.qualityMode else { return }
+        previewQualityMode = mode
 
-            switch mode {
-            case .balanced:
-                previewBaseCaptureMaxWidth = 1440
-                h264Encoder.setQualityProfile(.balanced)
-            case .ultra:
-                previewBaseCaptureMaxWidth = 1920
-                h264Encoder.setQualityProfile(.ultra)
-            }
-
-            adaptiveResolutionIndex = 0
-            updateCaptureWidthFromAdaptiveResolution()
-        }
-
-        if let profile = message.pointerProfile {
-            pointerProfile = profile
-            injector.setPointerProfile(profile)
+        switch mode {
+        case .balanced:
+            previewCaptureMaxWidth = 1440
+            h264Encoder.setQualityProfile(.balanced)
+        case .ultra:
+            previewCaptureMaxWidth = 1920
+            h264Encoder.setQualityProfile(.ultra)
         }
     }
 
@@ -389,14 +374,9 @@ final class MacWebSocketServer: @unchecked Sendable {
         guard frameTimer == nil else { return }
 
         adaptiveBitrateScale = 1.0
-        adaptiveResolutionIndex = 0
         adaptiveWindowTickCount = 0
         adaptiveWindowSkippedCount = 0
         adaptiveWindowEncodedCount = 0
-        lastAdaptiveSkipRatio = 0
-        telemetryTickCount = 0
-        injector.setPointerProfile(pointerProfile)
-        updateCaptureWidthFromAdaptiveResolution()
         h264Encoder.setAdaptiveBitrateScale(adaptiveBitrateScale)
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -423,11 +403,9 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         guard pairedClientIDs.isEmpty == false else { return }
         adaptiveWindowTickCount += 1
-        telemetryTickCount += 1
         guard isFrameCaptureInFlight == false else {
             adaptiveWindowSkippedCount += 1
             updateAdaptiveBitrateIfNeeded()
-            sendTelemetryIfNeeded(to: pairedClientIDs)
             return
         }
         isFrameCaptureInFlight = true
@@ -456,7 +434,6 @@ final class MacWebSocketServer: @unchecked Sendable {
                     if self.consecutiveFrameFailures % 30 == 0 {
                         self.reportError("Screen preview capture failed repeatedly. Confirm Screen Recording permission for the Mac app.")
                     }
-                    self.sendTelemetryIfNeeded(to: pairedClientIDs)
                     return
                 }
 
@@ -464,7 +441,6 @@ final class MacWebSocketServer: @unchecked Sendable {
                 self.h264Encoder.encode(pixelBuffer: framePixelBuffer.value)
                 self.adaptiveWindowEncodedCount += 1
                 self.updateAdaptiveBitrateIfNeeded()
-                self.sendTelemetryIfNeeded(to: pairedClientIDs)
             }
         }
     }
@@ -474,7 +450,6 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         let skipRatio = Double(adaptiveWindowSkippedCount) / Double(adaptiveWindowTickCount)
         let encodedRatio = Double(adaptiveWindowEncodedCount) / Double(adaptiveWindowTickCount)
-        lastAdaptiveSkipRatio = skipRatio
 
         var nextScale = adaptiveBitrateScale
         if consecutiveFrameFailures > 3 || skipRatio > 0.25 {
@@ -491,38 +466,9 @@ final class MacWebSocketServer: @unchecked Sendable {
             h264Encoder.setAdaptiveBitrateScale(adaptiveBitrateScale)
         }
 
-        if consecutiveFrameFailures > 3 || skipRatio > 0.25 {
-            adaptiveResolutionIndex = min(adaptiveResolutionIndex + 1, adaptiveResolutionLevels.count - 1)
-        } else if skipRatio < 0.04, encodedRatio > 0.9, consecutiveFrameFailures == 0 {
-            adaptiveResolutionIndex = max(adaptiveResolutionIndex - 1, 0)
-        }
-        updateCaptureWidthFromAdaptiveResolution()
-
         adaptiveWindowTickCount = 0
         adaptiveWindowSkippedCount = 0
         adaptiveWindowEncodedCount = 0
-    }
-
-    private func updateCaptureWidthFromAdaptiveResolution() {
-        let scale = adaptiveResolutionLevels[adaptiveResolutionIndex]
-        previewCaptureMaxWidth = max(960, previewBaseCaptureMaxWidth * scale)
-    }
-
-    private func sendTelemetryIfNeeded(to clientIDs: [UUID]) {
-        guard telemetryTickCount >= 60 else { return }
-        telemetryTickCount = 0
-
-        let telemetry = RemoteMessage.telemetry(
-            serverFPS: 60,
-            captureWidth: Double(previewCaptureMaxWidth),
-            captureHeight: Double(previewCaptureMaxWidth / (16.0 / 10.0)),
-            adaptiveBitrateScale: adaptiveBitrateScale,
-            skipRatio: lastAdaptiveSkipRatio
-        )
-
-        for id in clientIDs {
-            send(telemetry, to: id)
-        }
     }
 
     private func reportError(_ reason: String) {

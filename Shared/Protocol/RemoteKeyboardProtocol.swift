@@ -10,7 +10,6 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case mouseScroll
     case cursorPosition
     case streamConfig
-    case telemetry
     case screenFrame
     case ping
     case pong
@@ -41,11 +40,6 @@ public enum PreviewQualityMode: String, Codable, CaseIterable, Sendable {
     case ultra
 }
 
-public enum PointerProfile: String, Codable, CaseIterable, Sendable {
-    case linear
-    case edgeAssist
-}
-
 public struct RemoteMessage: Codable, Sendable {
     public var type: RemoteMessageType
     public var value: String?
@@ -66,12 +60,6 @@ public struct RemoteMessage: Codable, Sendable {
     public var cursorY: Double?
     public var button: MouseButton?
     public var qualityMode: PreviewQualityMode?
-    public var pointerProfile: PointerProfile?
-    public var serverFPS: Double?
-    public var captureWidth: Double?
-    public var captureHeight: Double?
-    public var adaptiveBitrateScale: Double?
-    public var skipRatio: Double?
     public var frameBase64: String?
 
     public init(
@@ -94,12 +82,6 @@ public struct RemoteMessage: Codable, Sendable {
         cursorY: Double? = nil,
         button: MouseButton? = nil,
         qualityMode: PreviewQualityMode? = nil,
-        pointerProfile: PointerProfile? = nil,
-        serverFPS: Double? = nil,
-        captureWidth: Double? = nil,
-        captureHeight: Double? = nil,
-        adaptiveBitrateScale: Double? = nil,
-        skipRatio: Double? = nil,
         frameBase64: String? = nil
     ) {
         self.type = type
@@ -121,12 +103,6 @@ public struct RemoteMessage: Codable, Sendable {
         self.cursorY = cursorY
         self.button = button
         self.qualityMode = qualityMode
-        self.pointerProfile = pointerProfile
-        self.serverFPS = serverFPS
-        self.captureWidth = captureWidth
-        self.captureHeight = captureHeight
-        self.adaptiveBitrateScale = adaptiveBitrateScale
-        self.skipRatio = skipRatio
         self.frameBase64 = frameBase64
     }
 
@@ -167,25 +143,8 @@ public struct RemoteMessage: Codable, Sendable {
         RemoteMessage(type: .cursorPosition, cursorX: x, cursorY: y)
     }
 
-    public static func streamConfig(qualityMode: PreviewQualityMode, pointerProfile: PointerProfile? = nil, token: String?) -> RemoteMessage {
-        RemoteMessage(type: .streamConfig, token: token, qualityMode: qualityMode, pointerProfile: pointerProfile)
-    }
-
-    public static func telemetry(
-        serverFPS: Double,
-        captureWidth: Double,
-        captureHeight: Double,
-        adaptiveBitrateScale: Double,
-        skipRatio: Double
-    ) -> RemoteMessage {
-        RemoteMessage(
-            type: .telemetry,
-            serverFPS: serverFPS,
-            captureWidth: captureWidth,
-            captureHeight: captureHeight,
-            adaptiveBitrateScale: adaptiveBitrateScale,
-            skipRatio: skipRatio
-        )
+    public static func streamConfig(qualityMode: PreviewQualityMode, token: String?) -> RemoteMessage {
+        RemoteMessage(type: .streamConfig, token: token, qualityMode: qualityMode)
     }
 
     public static func screenFrame(frameBase64: String) -> RemoteMessage {

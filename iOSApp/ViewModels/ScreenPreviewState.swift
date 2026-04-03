@@ -18,10 +18,6 @@ final class ScreenPreviewState: ObservableObject {
     private var smoothedFPS: Double?
     private var displayedFPS: Int?
     private var smoothedDecodeLatencyMs: Double?
-    private var streamServerFPS: Double?
-    private var streamCaptureWidth: Double?
-    private var streamBitrateScale: Double?
-    private var streamSkipRatio: Double?
     private var timerCancellable: AnyCancellable?
 
     init() {
@@ -41,10 +37,6 @@ final class ScreenPreviewState: ObservableObject {
         smoothedFPS = nil
         displayedFPS = nil
         smoothedDecodeLatencyMs = nil
-        streamServerFPS = nil
-        streamCaptureWidth = nil
-        streamBitrateScale = nil
-        streamSkipRatio = nil
         displayBridge.flush()
     }
 
@@ -92,14 +84,6 @@ final class ScreenPreviewState: ObservableObject {
         updateStatsLabel()
     }
 
-    func updateStreamTelemetry(serverFPS: Double, captureWidth: Double, bitrateScale: Double, skipRatio: Double) {
-        streamServerFPS = serverFPS
-        streamCaptureWidth = captureWidth
-        streamBitrateScale = bitrateScale
-        streamSkipRatio = skipRatio
-        updateStatsLabel()
-    }
-
     private func recordArrival() {
         let now = Date()
         frameTimestamps.append(now)
@@ -138,22 +122,7 @@ final class ScreenPreviewState: ObservableObject {
         let fps = displayedFPS ?? candidateFPS
         let ageMs = Int(now.timeIntervalSince(last) * 1000)
         let decodeMs = Int((smoothedDecodeLatencyMs ?? 0).rounded())
-
-        var parts: [String] = ["~\(fps) fps", "decode \(decodeMs) ms", "render \(ageMs) ms"]
-        if let streamServerFPS {
-            parts.append("tx \(Int(streamServerFPS.rounded()))")
-        }
-        if let streamCaptureWidth {
-            parts.append("w \(Int(streamCaptureWidth.rounded()))")
-        }
-        if let streamBitrateScale {
-            parts.append("q \(Int((streamBitrateScale * 100).rounded()))%")
-        }
-        if let streamSkipRatio {
-            parts.append("skip \(Int((streamSkipRatio * 100).rounded()))%")
-        }
-
-        statsLabel = parts.joined(separator: " • ")
+        statsLabel = "~\(fps) fps • decode \(decodeMs) ms • render \(ageMs) ms"
     }
 }
 
