@@ -80,7 +80,7 @@ struct IMoteMacApp: App {
     }
 }
 
-private final class MacHostCLIRunner {
+private final class MacHostCLIRunner: NSObject {
     private let port: UInt16
     private let pairingManager = PairingManager()
     private let permissionManager = AccessibilityPermissionManager()
@@ -93,6 +93,7 @@ private final class MacHostCLIRunner {
 
     init(port: UInt16) {
         self.port = port
+        super.init()
     }
 
     func start(showHelp: Bool) {
@@ -148,9 +149,17 @@ private final class MacHostCLIRunner {
     }
 
     private func startPairingTicker() {
-        pairingTicker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            self?.printPairingSnapshot(force: false)
-        }
+        pairingTicker = Timer.scheduledTimer(
+            timeInterval: 1,
+            target: self,
+            selector: #selector(handlePairingTick),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    @objc private func handlePairingTick() {
+        printPairingSnapshot(force: false)
     }
 
     private func printPairingSnapshot(force: Bool) {
