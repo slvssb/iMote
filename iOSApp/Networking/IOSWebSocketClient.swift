@@ -102,6 +102,10 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(RemoteMessage.streamConfig(qualityMode: qualityMode, token: pairedToken))
     }
 
+    func sendForgetCurrentDeviceTrust() {
+        sendMessage(RemoteMessage.trustControl(action: .forgetCurrentDevice, token: pairedToken, deviceID: deviceIdentifier))
+    }
+
     private func sendPairing(code: String) {
         let deviceName = UIDevice.current.name
         sendMessage(.pair(code: code, deviceName: deviceName, deviceID: deviceIdentifier))

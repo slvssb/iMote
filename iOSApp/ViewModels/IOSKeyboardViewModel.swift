@@ -41,6 +41,10 @@ final class IOSKeyboardViewModel: ObservableObject {
         hasTrustedSession && pairingCode.isEmpty
     }
 
+    var hasTrustedSessionLocally: Bool {
+        hasTrustedSession
+    }
+
     private let browser = BonjourServiceBrowser()
     private let client = IOSWebSocketClient()
     private let h264Decoder = H264FrameDecoder()
@@ -239,6 +243,17 @@ final class IOSKeyboardViewModel: ObservableObject {
         guard previewQualityMode != mode else { return }
         previewQualityMode = mode
         client.sendStreamConfig(qualityMode: mode)
+    }
+
+    func forgetTrustedSessionOnPhone() {
+        hasTrustedSession = false
+        pairingCode = ""
+    }
+
+    func forgetCurrentDeviceTrustOnMac() {
+        client.sendForgetCurrentDeviceTrust()
+        hasTrustedSession = false
+        pairingCode = ""
     }
 
     private func shiftedBaseKey(for character: Character) -> String? {

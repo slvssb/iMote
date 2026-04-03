@@ -220,6 +220,8 @@ final class MacWebSocketServer: @unchecked Sendable {
             handleMouseScroll(message, from: id)
         case .streamConfig:
             handleStreamConfig(message, from: id)
+        case .trustControl:
+            handleTrustControl(message, from: id)
         case .ping:
             send(RemoteMessage(type: .pong), to: id)
         default:
@@ -336,6 +338,24 @@ final class MacWebSocketServer: @unchecked Sendable {
         guard let mode = message.qualityMode else { return }
         userSelectedQualityMode = mode
         applyEffectiveQualityMode()
+    }
+
+    private func handleTrustControl(_ message: RemoteMessage, from id: UUID) {
+        let isAuthorized = authorize(id: id, token: message.token)
+        guard isAuthorized else {
+            send(.error("Unauthorized session token"), to: id)
+            return
+        }
+
+        guard let action = message.trustAction else { return }
+        switch action {
+        case .forgetCurrentDevice:
+            guard let deviceID = message.deviceID, deviceID.isEmpty == false else {
+                send(.error("Missing device identifier for trust action"), to: id)
+                return
+            }
+            pairingManager.removeTrustedDevice(deviceID: deviceID)
+        }
     }
 
     private func authorize(id: UUID, token: String?) -> Bool {

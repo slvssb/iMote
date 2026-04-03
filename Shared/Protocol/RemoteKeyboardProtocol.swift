@@ -10,6 +10,7 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case mouseScroll
     case cursorPosition
     case streamConfig
+    case trustControl
     case streamStatus
     case screenFrame
     case ping
@@ -41,6 +42,10 @@ public enum PreviewQualityMode: String, Codable, CaseIterable, Sendable {
     case ultra
 }
 
+public enum TrustControlAction: String, Codable, Sendable {
+    case forgetCurrentDevice
+}
+
 public struct RemoteMessage: Codable, Sendable {
     public var type: RemoteMessageType
     public var value: String?
@@ -61,6 +66,7 @@ public struct RemoteMessage: Codable, Sendable {
     public var cursorY: Double?
     public var button: MouseButton?
     public var qualityMode: PreviewQualityMode?
+    public var trustAction: TrustControlAction?
     public var thermalOverrideActive: Bool?
     public var frameBase64: String?
 
@@ -84,6 +90,7 @@ public struct RemoteMessage: Codable, Sendable {
         cursorY: Double? = nil,
         button: MouseButton? = nil,
         qualityMode: PreviewQualityMode? = nil,
+        trustAction: TrustControlAction? = nil,
         thermalOverrideActive: Bool? = nil,
         frameBase64: String? = nil
     ) {
@@ -106,6 +113,7 @@ public struct RemoteMessage: Codable, Sendable {
         self.cursorY = cursorY
         self.button = button
         self.qualityMode = qualityMode
+        self.trustAction = trustAction
         self.thermalOverrideActive = thermalOverrideActive
         self.frameBase64 = frameBase64
     }
@@ -149,6 +157,10 @@ public struct RemoteMessage: Codable, Sendable {
 
     public static func streamConfig(qualityMode: PreviewQualityMode, token: String?) -> RemoteMessage {
         RemoteMessage(type: .streamConfig, token: token, qualityMode: qualityMode)
+    }
+
+    public static func trustControl(action: TrustControlAction, token: String?, deviceID: String?) -> RemoteMessage {
+        RemoteMessage(type: .trustControl, token: token, deviceID: deviceID, trustAction: action)
     }
 
     public static func streamStatus(thermalOverrideActive: Bool) -> RemoteMessage {

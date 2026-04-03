@@ -97,6 +97,13 @@ final class PairingManager {
         }
     }
 
+    func removeTrustedDevice(deviceID: String) {
+        withLock {
+            trustedDeviceIDs.remove(deviceID)
+            persistTrustedDevices()
+        }
+    }
+
     private func ensureActiveCode() {
         if Date() > expiresAt {
             currentCode = PairingManager.makeCode()

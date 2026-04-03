@@ -209,6 +209,29 @@ private struct PreviewStatsStripView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
                     }
+
+                    if viewModel.hasTrustedSessionLocally {
+                        VStack(alignment: .leading, spacing: Layout.controlSpacing) {
+                            Text("Trusted Device")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            HStack(spacing: Layout.controlSpacing) {
+                                Button("Forget on Phone") {
+                                    viewModel.forgetTrustedSessionOnPhone()
+                                }
+                                .buttonStyle(LiquidGlassButtonStyle(tint: .gray))
+                                .frame(maxWidth: .infinity)
+
+                                Button("Forget on Mac") {
+                                    viewModel.forgetCurrentDeviceTrustOnMac()
+                                }
+                                .buttonStyle(LiquidGlassButtonStyle(tint: .orange))
+                                .frame(maxWidth: .infinity)
+                                .disabled(viewModel.isPaired == false)
+                            }
+                        }
+                    }
                 }
 
                 HStack(spacing: Layout.controlSpacing) {
