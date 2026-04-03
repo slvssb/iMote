@@ -15,51 +15,38 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
     private var isConfigured = false
     private var isAnalyzingFrame = false
     private var frameCounter = 0
-    private var debugNoFaceCounter = 0
-    private var debugNoGazeCounter = 0
-    private var debugMoveCounter = 0
     private var baselinePoint: CGPoint?
     private var smoothedOffset = CGPoint.zero
     private var lastMoveDispatchTime: CFTimeInterval = 0
 
     func start() {
         guard isRunning == false else { return }
-        print("[EyeCursor] start() called")
 
         let authStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        print("[EyeCursor] camera authorization status: \(authStatus.rawValue)")
 
         switch authStatus {
         case .authorized:
-            print("[EyeCursor] authorization already granted")
             startCaptureSession()
         case .notDetermined:
-            print("[EyeCursor] requesting camera permission")
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                print("[EyeCursor] camera permission result: granted=\(granted)")
                 guard granted else { return }
                 self?.startCaptureSession()
             }
         case .denied, .restricted:
-            print("[EyeCursor] camera access unavailable (denied/restricted)")
             break
         @unknown default:
-            print("[EyeCursor] unknown camera authorization status")
             break
         }
     }
 
     func stop() {
         guard isRunning else { return }
-        print("[EyeCursor] stop() called")
 
         captureQueue.async { [weak self] in
             guard let self else { return }
-            print("[EyeCursor] stopping capture session")
             self.captureSession.stopRunning()
             DispatchQueue.main.async { [weak self] in
                 self?.isRunning = false
-                print("[EyeCursor] isRunning=false")
             }
         }
 
@@ -68,24 +55,20 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
     }
 
     private func startCaptureSession() {
-        print("[EyeCursor] startCaptureSession()")
         configureIfNeeded()
 
         captureQueue.async { [weak self] in
             guard let self else { return }
             guard self.captureSession.isRunning == false else { return }
-            print("[EyeCursor] starting AVCaptureSession.run()")
             self.captureSession.startRunning()
             DispatchQueue.main.async { [weak self] in
                 self?.isRunning = true
-                print("[EyeCursor] isRunning=true")
             }
         }
     }
 
     private func configureIfNeeded() {
         guard isConfigured == false else { return }
-        print("[EyeCursor] configureIfNeeded() - begin")
 
         captureQueue.sync {
             captureSession.beginConfiguration()
@@ -96,12 +79,10 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
                 let input = try? AVCaptureDeviceInput(device: device),
                 captureSession.canAddInput(input)
             else {
-                print("[EyeCursor] configuration failed: missing front camera input")
                 captureSession.commitConfiguration()
                 return
             }
             captureSession.addInput(input)
-            print("[EyeCursor] camera input added")
 
             videoOutput.videoSettings = [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
@@ -111,27 +92,19 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
 
             if captureSession.canAddOutput(videoOutput) {
                 captureSession.addOutput(videoOutput)
-                print("[EyeCursor] video output added")
-            } else {
-                print("[EyeCursor] configuration warning: cannot add video output")
             }
 
             if let connection = videoOutput.connection(with: .video) {
                 connection.isVideoMirrored = true
-                print("[EyeCursor] video connection mirrored")
             }
 
             captureSession.commitConfiguration()
             isConfigured = true
-            print("[EyeCursor] configureIfNeeded() - complete")
         }
     }
 
     private func handle(sampleBuffer: CMSampleBuffer) {
         frameCounter += 1
-        if frameCounter % 180 == 0 {
-            print("[EyeCursor] frame heartbeat: frame=\(frameCounter) analyzing=\(isAnalyzingFrame)")
-        }
         guard frameCounter % 3 == 0 else { return }
         guard isAnalyzingFrame == false else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
@@ -145,17 +118,6 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
             guard let observation = (request.results as? [VNFaceObservation])?.first,
                   let gazePoint = self.estimatedGazePoint(from: observation)
             else {
-                if (request.results as? [VNFaceObservation])?.isEmpty ?? true {
-                    self.debugNoFaceCounter += 1
-                    if self.debugNoFaceCounter % 30 == 0 {
-                        print("[EyeCursor] no face detected (\(self.debugNoFaceCounter) times)")
-                    }
-                } else {
-                    self.debugNoGazeCounter += 1
-                    if self.debugNoGazeCounter % 20 == 0 {
-                        print("[EyeCursor] face detected but gaze landmarks unavailable (\(self.debugNoGazeCounter) times)")
-                    }
-                }
                 return
             }
 
@@ -167,7 +129,6 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
             try handler.perform([request])
         } catch {
             isAnalyzingFrame = false
-            print("[EyeCursor] Vision request failed: \(error.localizedDescription)")
         }
     }
 
@@ -216,7 +177,6 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
     private func process(gazePoint: CGPoint) {
         if baselinePoint == nil {
             baselinePoint = gazePoint
-            print("[EyeCursor] baseline initialized at x=\(gazePoint.x), y=\(gazePoint.y)")
             return
         }
 
@@ -256,10 +216,6 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
         guard (now - lastMoveDispatchTime) >= minDispatchInterval else { return }
         lastMoveDispatchTime = now
 
-        debugMoveCounter += 1
-        if debugMoveCounter % 12 == 0 {
-            print("[EyeCursor] onMove deltaX=\(deltaX), deltaY=\(deltaY)")
-        }
         DispatchQueue.main.async { [weak self] in
             self?.onMove?(deltaX, deltaY)
         }

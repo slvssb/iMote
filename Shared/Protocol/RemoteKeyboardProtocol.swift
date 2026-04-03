@@ -10,6 +10,7 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case mouseScroll
     case cursorPosition
     case streamConfig
+    case streamResync
     case trustControl
     case streamStatus
     case screenFrame
@@ -160,6 +161,10 @@ public struct RemoteMessage: Codable, Sendable {
 
     public static func streamConfig(qualityMode: PreviewQualityMode, previewZoomLevel: Double?, token: String?) -> RemoteMessage {
         RemoteMessage(type: .streamConfig, token: token, qualityMode: qualityMode, previewZoomLevel: previewZoomLevel)
+    }
+
+    public static func streamResync(token: String?) -> RemoteMessage {
+        RemoteMessage(type: .streamResync, token: token)
     }
 
     public static func trustControl(action: TrustControlAction, token: String?, deviceID: String?) -> RemoteMessage {

@@ -55,6 +55,8 @@ final class H264FrameEncoder: @unchecked Sendable {
     private var height: Int32 = 0
     private var frameIndex: Int64 = 0
     private var didSendConfig = false
+    private var pendingConfigEmission = false
+    private var forceNextKeyframe = false
     private var qualityProfile: QualityProfile = .ultra
     private var adaptiveBitrateScale: Double = 1.0
 
@@ -81,6 +83,8 @@ final class H264FrameEncoder: @unchecked Sendable {
                 self.compressionSession = nil
             }
             self.didSendConfig = false
+            self.pendingConfigEmission = false
+            self.forceNextKeyframe = false
             self.frameIndex = 0
         }
     }
@@ -107,6 +111,13 @@ final class H264FrameEncoder: @unchecked Sendable {
         }
     }
 
+    func requestStreamResync() {
+        queue.async {
+            self.pendingConfigEmission = true
+            self.forceNextKeyframe = true
+        }
+    }
+
     private func encodeInternal(_ cgImage: CGImage) {
         let nextWidth = Int32(cgImage.width)
         let nextHeight = Int32(cgImage.height)
@@ -122,13 +133,14 @@ final class H264FrameEncoder: @unchecked Sendable {
 
         let pts = CMTime(value: frameIndex, timescale: CMTimeScale(Self.targetFPS))
         frameIndex += 1
+        let frameProperties = makeFrameProperties()
 
         VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: pts,
             duration: .invalid,
-            frameProperties: nil,
+            frameProperties: frameProperties,
             sourceFrameRefcon: nil,
             infoFlagsOut: nil
         )
@@ -148,13 +160,14 @@ final class H264FrameEncoder: @unchecked Sendable {
 
         let pts = CMTime(value: frameIndex, timescale: CMTimeScale(Self.targetFPS))
         frameIndex += 1
+        let frameProperties = makeFrameProperties()
 
         VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: pts,
             duration: .invalid,
-            frameProperties: nil,
+            frameProperties: frameProperties,
             sourceFrameRefcon: nil,
             infoFlagsOut: nil
         )
@@ -170,6 +183,8 @@ final class H264FrameEncoder: @unchecked Sendable {
         self.width = width
         self.height = height
         self.didSendConfig = false
+        self.pendingConfigEmission = false
+        self.forceNextKeyframe = false
         self.frameIndex = 0
 
         var session: VTCompressionSession?
@@ -278,10 +293,11 @@ final class H264FrameEncoder: @unchecked Sendable {
     fileprivate func handleEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
-        if didSendConfig == false,
+        if (didSendConfig == false || pendingConfigEmission),
            let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
             emitConfigPacket(formatDescription)
             didSendConfig = true
+            pendingConfigEmission = false
         }
 
         guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
@@ -306,6 +322,15 @@ final class H264FrameEncoder: @unchecked Sendable {
         var packet = Data([Self.frameMarker])
         packet.append(Data(bytes: dataPointer, count: totalLength))
         onPacket?(packet)
+    }
+
+    private func makeFrameProperties() -> CFDictionary? {
+        guard forceNextKeyframe else { return nil }
+        forceNextKeyframe = false
+        let options: [CFString: Any] = [
+            kVTEncodeFrameOptionKey_ForceKeyFrame: true
+        ]
+        return options as CFDictionary
     }
 
     private func emitConfigPacket(_ formatDescription: CMFormatDescription) {

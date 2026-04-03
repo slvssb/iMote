@@ -8,6 +8,7 @@ import UIKit
 @MainActor
 final class ScreenPreviewState: ObservableObject {
     @Published private(set) var hasFrame = false
+    @Published private(set) var lastFrameReceivedAt: Date?
     @Published private(set) var sourceAspectRatio: CGFloat = 16.0 / 10.0
     @Published var statsLabel = "No frames yet"
     @Published private(set) var followAnchor = UnitPoint.center
@@ -37,6 +38,7 @@ final class ScreenPreviewState: ObservableObject {
 
     func reset() {
         hasFrame = false
+        lastFrameReceivedAt = nil
         sourceAspectRatio = 16.0 / 10.0
         frameTimestamps.removeAll()
         statsLabel = "No frames yet"
@@ -97,6 +99,7 @@ final class ScreenPreviewState: ObservableObject {
 
     private func recordArrival() {
         let now = Date()
+        lastFrameReceivedAt = now
         frameTimestamps.append(now)
         let cutoff = now.addingTimeInterval(-5)
         frameTimestamps.removeAll { $0 < cutoff }
@@ -192,36 +195,76 @@ final class ScreenPreviewState: ObservableObject {
 
 @MainActor
 final class SampleBufferDisplayBridge {
-    weak var displayLayer: AVSampleBufferDisplayLayer?
+    private var displayLayers = NSHashTable<AVSampleBufferDisplayLayer>.weakObjects()
+    private let stateLock = NSLock()
+    private var lastMissingLayerAt: Date?
+
+    var isLayerAttached: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return displayLayers.allObjects.isEmpty == false
+    }
+
+    var missingLayerSince: Date? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return lastMissingLayerAt
+    }
 
     func attach(layer: AVSampleBufferDisplayLayer) {
-        displayLayer = layer
-        // Fill the available preview surface edge-to-edge.
-        layer.videoGravity = .resizeAspectFill
+        stateLock.lock()
+        if displayLayers.contains(layer) == false {
+            displayLayers.add(layer)
+        }
+        lastMissingLayerAt = nil
+        stateLock.unlock()
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
-        guard let layer = displayLayer else { return }
-        if #available(iOS 18.0, *) {
-            let renderer = layer.sampleBufferRenderer
-            if renderer.status == .failed {
-                renderer.flush(removingDisplayedImage: true, completionHandler: nil)
+        let layers = currentLayers()
+        guard layers.isEmpty == false else {
+            stateLock.lock()
+            if lastMissingLayerAt == nil {
+                lastMissingLayerAt = Date()
             }
-            renderer.enqueue(sampleBuffer)
-        } else {
-            if layer.status == .failed {
-                layer.flushAndRemoveImage()
+            stateLock.unlock()
+            return
+        }
+        stateLock.lock()
+        lastMissingLayerAt = nil
+        stateLock.unlock()
+
+        for layer in layers {
+            if #available(iOS 18.0, *) {
+                let renderer = layer.sampleBufferRenderer
+                if renderer.status == .failed {
+                    renderer.flush(removingDisplayedImage: true, completionHandler: nil)
+                }
+                renderer.enqueue(sampleBuffer)
+            } else {
+                if layer.status == .failed {
+                    layer.flushAndRemoveImage()
+                }
+                layer.enqueue(sampleBuffer)
             }
-            layer.enqueue(sampleBuffer)
         }
     }
 
     func flush() {
-        guard let layer = displayLayer else { return }
-        if #available(iOS 18.0, *) {
-            layer.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
-        } else {
-            layer.flushAndRemoveImage()
+        let layers = currentLayers()
+        guard layers.isEmpty == false else { return }
+        for layer in layers {
+            if #available(iOS 18.0, *) {
+                layer.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+            } else {
+                layer.flushAndRemoveImage()
+            }
         }
+    }
+
+    private func currentLayers() -> [AVSampleBufferDisplayLayer] {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return displayLayers.allObjects
     }
 }

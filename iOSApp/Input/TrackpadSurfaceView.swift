@@ -16,6 +16,7 @@ struct TrackpadSurfaceView: UIViewRepresentable {
     var onScroll: (Double, Double) -> Void
     var onClick: (MouseButton, KeyAction) -> Void
     var onFourFingerSwipe: (SwipeDirection) -> Void
+    var isVisualChromeEnabled: Bool = true
 
     func makeUIView(context: Context) -> TrackpadGestureView {
         let view = TrackpadGestureView()
@@ -25,6 +26,7 @@ struct TrackpadSurfaceView: UIViewRepresentable {
         view.onFourFingerSwipe = onFourFingerSwipe
         view.mouseScale = mouseScale
         view.scrollScale = scrollScale
+        view.isVisualChromeEnabled = isVisualChromeEnabled
         return view
     }
 
@@ -36,6 +38,7 @@ struct TrackpadSurfaceView: UIViewRepresentable {
         uiView.mouseScale = mouseScale
         uiView.scrollScale = scrollScale
         uiView.isNaturalScrollingEnabled = isNaturalScrollingEnabled
+        uiView.isVisualChromeEnabled = isVisualChromeEnabled
         uiView.refreshTheme()
     }
 }
@@ -48,6 +51,7 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
     var mouseScale: Double = 1.45
     var scrollScale: Double = 1.2
     var isNaturalScrollingEnabled = true
+    var isVisualChromeEnabled = true
 
     private var isThreeFingerDragging = false
     private let leftClickFeedback = UIImpactFeedbackGenerator(style: .soft)
@@ -458,6 +462,14 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
     }
 
     func refreshTheme() {
+        if isVisualChromeEnabled == false {
+            backgroundColor = .clear
+            layer.borderColor = UIColor.clear.cgColor
+            layer.borderWidth = 0
+            return
+        }
+
+        layer.borderWidth = 0.8
         if traitCollection.userInterfaceStyle == .dark {
             backgroundColor = UIColor(red: 0.22, green: 0.22, blue: 0.24, alpha: 1)
             layer.borderColor = UIColor.white.withAlphaComponent(0.16).cgColor

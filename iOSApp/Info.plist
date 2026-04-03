@@ -24,10 +24,10 @@
 	<array>
 		<string>_rkbd._tcp</string>
 	</array>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>This app discovers and connects to your Mac keyboard server on local Wi-Fi.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Eye cursor control uses the front camera to move the Mac pointer with your eye movement.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>This app discovers and connects to your Mac keyboard server on local Wi-Fi.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -36,6 +36,12 @@
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>

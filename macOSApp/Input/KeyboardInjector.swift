@@ -29,7 +29,6 @@ final class KeyboardInjector {
     private var lastMouseTapButton: MouseButton?
     private var lastMouseTapClickCount: Int64 = 0
     private var isSystemEventsControlArrowAuthorized = true
-    private var debugMouseMoveInjectCount: Int64 = 0
 
     init(permissionManager: AccessibilityPermissionManager) {
         self.permissionManager = permissionManager
@@ -53,7 +52,6 @@ final class KeyboardInjector {
         guard let keyCode = mapper.keyCode(for: normalizedKey) else {
             throw KeyboardInjectorError.keyNotMapped("\(key) (normalized: \(normalizedKey))")
         }
-        print("[TempKeyLog][Injector] key=\(key) normalized=\(normalizedKey) keyCode=\(keyCode) action=\(action.rawValue) modifiers=\(modifiers.map { $0.rawValue })")
 
         let flags = mapper.eventFlags(for: modifiers)
         switch action {
@@ -63,11 +61,9 @@ final class KeyboardInjector {
             try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
         case .tap:
             if shouldUseControlArrowShortcutPath(keyCode: keyCode, modifiers: modifiers) {
-                print("[TempKeyLog][Injector] path=controlArrowShortcut")
                 try postControlArrowShortcutTap(keyCode: keyCode)
                 return
             }
-            print("[TempKeyLog][Injector] path=standardTap modifiersEmpty=\(modifiers.isEmpty)")
             if modifiers.isEmpty {
                 try postKeyEvent(keyCode: keyCode, keyDown: true, flags: flags)
                 try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
@@ -91,10 +87,6 @@ final class KeyboardInjector {
         let adjustedDelta = adjustedEdgeAwareDelta(from: current, deltaX: deltaX, deltaY: deltaY)
         let rawNextPoint = CGPoint(x: current.x + adjustedDelta.x, y: current.y - adjustedDelta.y)
         let nextPoint = clampedPointToActiveDisplays(rawNextPoint)
-        debugMouseMoveInjectCount += 1
-        if debugMouseMoveInjectCount % 20 == 0 {
-            print("[EyeCursor][Injector] move count=\(debugMouseMoveInjectCount) current=(\(current.x),\(current.y)) rawDelta=(\(deltaX),\(deltaY)) adjustedDelta=(\(adjustedDelta.x),\(adjustedDelta.y)) next=(\(nextPoint.x),\(nextPoint.y))")
-        }
         guard let moveEvent = CGEvent(
             mouseEventSource: eventSource,
             mouseType: .mouseMoved,
@@ -180,7 +172,6 @@ final class KeyboardInjector {
             throw KeyboardInjectorError.eventBuildFailed
         }
         event.flags = flags
-        print("[TempKeyLog][PostKeyEvent] keyCode=\(keyCode) keyDown=\(keyDown) flags=\(formatFlags(flags)) tap=cgSessionEventTap")
         event.post(tap: .cgSessionEventTap)
     }
 
@@ -191,7 +182,6 @@ final class KeyboardInjector {
 
     private func postControlArrowShortcutTap(keyCode: CGKeyCode) throws {
         if performSystemEventsControlArrow(keyCode: keyCode) {
-            print("[TempKeyLog][ControlArrow] path=systemEvents keyCode=\(keyCode)")
             return
         }
 
@@ -207,7 +197,6 @@ final class KeyboardInjector {
         keyDown.flags = controlFlags
         keyUp.flags = controlFlags
 
-        print("[TempKeyLog][ControlArrow] source=combinedSessionState keyCode=\(keyCode) downFlags=\(formatFlags(keyDown.flags)) upFlags=\(formatFlags(keyUp.flags)) tap=cghidEventTap")
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
     }
@@ -240,22 +229,9 @@ final class KeyboardInjector {
             let errorNumber = (scriptError["NSAppleScriptErrorNumber"] as? NSNumber)?.intValue
             if errorNumber == -1743 {
                 isSystemEventsControlArrowAuthorized = false
-                print("[TempKeyLog][ControlArrow] System Events automation not authorized (-1743). Falling back to CGEvent path.")
-            } else {
-                print("[TempKeyLog][ControlArrow] systemEventsError=\(scriptError)")
             }
         }
         return execution.result
-    }
-
-    private func formatFlags(_ flags: CGEventFlags) -> String {
-        let names: [String] = [
-            flags.contains(.maskCommand) ? "command" : nil,
-            flags.contains(.maskAlternate) ? "option" : nil,
-            flags.contains(.maskShift) ? "shift" : nil,
-            flags.contains(.maskControl) ? "control" : nil
-        ].compactMap { $0 }
-        return "\(names) raw=\(flags.rawValue)"
     }
 
     private func postModifiedTap(keyCode: CGKeyCode, modifiers: [RemoteModifier], flags: CGEventFlags) throws {

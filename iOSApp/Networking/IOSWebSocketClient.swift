@@ -31,7 +31,6 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private var shouldReconnect = false
     private let deviceIdentifier = UIDevice.current.identifierForVendor?.uuidString
     private var activeConnectionGeneration: UInt64 = 0
-    private var debugMouseMoveSendCount = 0
 
     private enum BinaryPacketMarker {
         static let h264Config: UInt8 = 0x10
@@ -93,10 +92,6 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     }
 
     func sendMouseMove(deltaX: Double, deltaY: Double) {
-        debugMouseMoveSendCount += 1
-        if debugMouseMoveSendCount % 20 == 0 {
-            print("[EyeCursor][iOS->WS] sendMouseMove count=\(debugMouseMoveSendCount) dx=\(deltaX) dy=\(deltaY) hasTask=\(task != nil) hasToken=\(pairedToken != nil)")
-        }
         sendMessage(RemoteMessage.mouseMove(deltaX: deltaX, deltaY: deltaY, token: pairedToken))
     }
 
@@ -110,6 +105,10 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
 
     func sendStreamConfig(qualityMode: PreviewQualityMode, previewZoomLevel: Double?) {
         sendMessage(RemoteMessage.streamConfig(qualityMode: qualityMode, previewZoomLevel: previewZoomLevel, token: pairedToken))
+    }
+
+    func sendStreamResync() {
+        sendMessage(RemoteMessage.streamResync(token: pairedToken))
     }
 
     func sendForgetCurrentDeviceTrust() {

@@ -28,6 +28,8 @@ private struct FixedScreenPreview: View {
     let zoomScale: CGFloat
     let isAutoFollowEnabled: Bool
     let isVirtualOverscanEnabled: Bool
+    let videoGravity: AVLayerVideoGravity
+    let showsBlackBackdrop: Bool
 
     var body: some View {
         GeometryReader { proxy in
@@ -36,10 +38,12 @@ private struct FixedScreenPreview: View {
             let overscanY = (isAutoFollowEnabled && isVirtualOverscanEnabled) ? proxy.size.height / (4 * safeZoom) : 0
 
             ZStack(alignment: .bottomLeading) {
-                Rectangle()
-                    .fill(.black.opacity(0.8))
+                if showsBlackBackdrop {
+                    Rectangle()
+                        .fill(.black.opacity(0.8))
+                }
 
-                SampleBufferPreviewView(bridge: preview.displayBridge)
+                SampleBufferPreviewView(bridge: preview.displayBridge, videoGravity: videoGravity)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // Virtual overscan lets edge content move closer to center at high zoom.
                     .padding(.horizontal, overscanX)
@@ -50,27 +54,29 @@ private struct FixedScreenPreview: View {
                     )
                     .clipped()
 
-                if preview.hasFrame == false {
+                if preview.hasFrame == false && showsBlackBackdrop {
                     Color.black.opacity(0.9)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(preview.sourceAspectRatio, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
 private struct SampleBufferPreviewView: UIViewRepresentable {
     let bridge: SampleBufferDisplayBridge
+    let videoGravity: AVLayerVideoGravity
 
     func makeUIView(context: Context) -> SampleBufferDisplayLayerView {
         let view = SampleBufferDisplayLayerView()
+        view.sampleBufferLayer.videoGravity = videoGravity
         bridge.attach(layer: view.sampleBufferLayer)
         return view
     }
 
     func updateUIView(_ uiView: SampleBufferDisplayLayerView, context: Context) {
+        uiView.sampleBufferLayer.videoGravity = videoGravity
         bridge.attach(layer: uiView.sampleBufferLayer)
     }
 }
@@ -200,6 +206,11 @@ private struct MacCenteredLogoOverlay: View {
     @State private var isStatsSectionVisible = false
     @State private var isKeyboardSectionVisible = false
     @State private var isTrackpadSectionVisible = false
+    @State private var isImmersiveLandscapeModeEnabled = false
+    @State private var previewResyncTask: Task<Void, Never>?
+    @State private var lastPreviewResyncAt: Date?
+    @State private var previewSurfaceVersion = 0
+    @State private var lastOrientationResyncAt: Date?
     @StateObject private var eyeCursorController = EyeCursorController()
     @FocusState private var focusedField: Field?
 
@@ -220,71 +231,140 @@ private struct MacCenteredLogoOverlay: View {
                         let previewAspect = max(previewAspectSource, 0.01)
                         let previewHeight = geometry.size.width / previewAspect
 
-                        VStack(spacing: 0) {
-                            Color.clear
-                                .frame(height: topInset)
-                                .opacity(isPreviewSectionVisible ? 1 : 0)
-                                .animation(.easeInOut(duration: 0.35), value: isPreviewSectionVisible)
+                        if isImmersiveLandscapeModeEnabled {
+                            ZStack(alignment: .topTrailing) {
+                                ZStack {
+                                    fixedScreenPreview
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        .opacity(isLivePreviewVisible ? 1 : 0)
 
-                            ZStack {
-                                if isLivePreviewVisible == false || isStartupOverlayVisible || isDisconnectPreviewOverlayVisible {
-                                    Color.black
-                                }
-
-                                fixedScreenPreview
-                                    .opacity(isLivePreviewVisible ? 1 : 0)
-
-                                if isStartupOverlayVisible {
-                                    MacStartupOverlay(
-                                        progress: startupProgress,
-                                        progressOpacity: isStartupProgressVisible ? 1 : 0
+                                    TrackpadSurfaceView(
+                                        mouseScale: Layout.mouseMotionMultiplier,
+                                        scrollScale: Layout.scrollMultiplier,
+                                        isNaturalScrollingEnabled: false,
+                                        onMove: { deltaX, deltaY in
+                                            viewModel.moveMouse(deltaX: deltaX, deltaY: deltaY)
+                                        },
+                                        onScroll: { deltaX, deltaY in
+                                            viewModel.scrollMouse(deltaX: deltaX, deltaY: deltaY)
+                                        },
+                                        onClick: { button, action in
+                                            viewModel.clickMouse(button: button, action: action)
+                                        },
+                                        onFourFingerSwipe: { direction in
+                                            switch direction {
+                                            case .up:
+                                                viewModel.sendNamedKey(.upArrow, modifiers: [.control])
+                                            case .down:
+                                                viewModel.sendNamedKey(.downArrow, modifiers: [.control])
+                                            case .left:
+                                                viewModel.sendNamedKey(.leftArrow, modifiers: [.control])
+                                            case .right:
+                                                viewModel.sendNamedKey(.rightArrow, modifiers: [.control])
+                                            }
+                                        },
+                                        isVisualChromeEnabled: false
                                     )
-                                }
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                                if isDisconnectPreviewOverlayVisible {
-                                    MacCenteredLogoOverlay()
-                                        .opacity(disconnectPreviewOverlayOpacity)
+                                    if isStartupOverlayVisible {
+                                        MacStartupOverlay(
+                                            progress: startupProgress,
+                                            progressOpacity: isStartupProgressVisible ? 1 : 0
+                                        )
+                                    }
+
+                                    if isDisconnectPreviewOverlayVisible {
+                                        MacCenteredLogoOverlay()
+                                            .opacity(disconnectPreviewOverlayOpacity)
+                                    }
                                 }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .padding(.vertical, 10)
+
+                                Button {
+                                    focusedField = nil
+                                    dismissTypingCapture()
+                                    isConfigSheetPresented = true
+                                } label: {
+                                    Image(systemName: "slider.horizontal.3")
+                                        .font(.headline.weight(.semibold))
+                                        .frame(width: 42, height: 42)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.top, topInset + 8)
+                                .padding(.trailing, 12)
                             }
-                                .opacity(isPreviewSectionVisible ? 1 : 0)
-                                .animation(.easeInOut(duration: 0.35), value: isPreviewSectionVisible)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .frame(height: previewHeight)
-                                .padding(.horizontal, 4)
-                                .allowsHitTesting(isPreviewSectionVisible)
+                            .opacity(isConnectedContentVisible ? connectedScreenOpacity : 0)
+                            .allowsHitTesting(isConnectedContentVisible && connectedScreenOpacity > 0.01)
+                        } else {
+                            VStack(spacing: 0) {
+                                Color.clear
+                                    .frame(height: topInset)
+                                    .opacity(isPreviewSectionVisible ? 1 : 0)
+                                    .animation(.easeInOut(duration: 0.35), value: isPreviewSectionVisible)
 
-                            previewStatsStrip
-                                .padding(.top, 10)
-                                .padding(.bottom, 10)
-                                .opacity(isStatsSectionVisible ? 1 : 0)
-                                .animation(.easeInOut(duration: 0.35), value: isStatsSectionVisible)
-                                .allowsHitTesting(isStatsSectionVisible)
+                                ZStack {
+                                    if isLivePreviewVisible == false || isStartupOverlayVisible || isDisconnectPreviewOverlayVisible {
+                                        Color.black
+                                    }
 
-                            inputPanel
-                                .frame(maxWidth: Layout.contentMaxWidth, alignment: .top)
-                                .frame(maxWidth: .infinity, alignment: .top)
-                                .opacity(isKeyboardSectionVisible ? 1 : 0)
-                                .animation(.easeInOut(duration: 0.35), value: isKeyboardSectionVisible)
-                                .allowsHitTesting(isKeyboardSectionVisible)
-                                .padding(.top, Layout.sectionSpacing)
+                                    fixedScreenPreview
+                                        .opacity(isLivePreviewVisible ? 1 : 0)
+
+                                    if isStartupOverlayVisible {
+                                        MacStartupOverlay(
+                                            progress: startupProgress,
+                                            progressOpacity: isStartupProgressVisible ? 1 : 0
+                                        )
+                                    }
+
+                                    if isDisconnectPreviewOverlayVisible {
+                                        MacCenteredLogoOverlay()
+                                            .opacity(disconnectPreviewOverlayOpacity)
+                                    }
+                                }
+                                    .opacity(isPreviewSectionVisible ? 1 : 0)
+                                    .animation(.easeInOut(duration: 0.35), value: isPreviewSectionVisible)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .frame(height: previewHeight)
+                                    .padding(.horizontal, 4)
+                                    .allowsHitTesting(isPreviewSectionVisible)
+
+                                previewStatsStrip
+                                    .padding(.top, 10)
+                                    .padding(.bottom, 10)
+                                    .opacity(isStatsSectionVisible ? 1 : 0)
+                                    .animation(.easeInOut(duration: 0.35), value: isStatsSectionVisible)
+                                    .allowsHitTesting(isStatsSectionVisible)
+
+                                inputPanel
+                                    .frame(maxWidth: Layout.contentMaxWidth, alignment: .top)
+                                    .frame(maxWidth: .infinity, alignment: .top)
+                                    .opacity(isKeyboardSectionVisible ? 1 : 0)
+                                    .animation(.easeInOut(duration: 0.35), value: isKeyboardSectionVisible)
+                                    .allowsHitTesting(isKeyboardSectionVisible)
+                                    .padding(.top, Layout.sectionSpacing)
+                                    .padding(.horizontal, Layout.contentPadding)
+
+                                mousePanel
+                                    .frame(minHeight: Layout.touchpadHeight)
+                                    .frame(maxWidth: Layout.contentMaxWidth, maxHeight: .infinity, alignment: .top)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                    .opacity(isTrackpadSectionVisible ? 1 : 0)
+                                    .animation(.easeInOut(duration: 0.35), value: isTrackpadSectionVisible)
+                                    .allowsHitTesting(isTrackpadSectionVisible)
+                                    .padding(.top, Layout.sectionSpacing)
                                 .padding(.horizontal, Layout.contentPadding)
-
-                            mousePanel
-                                .frame(minHeight: Layout.touchpadHeight)
-                                .frame(maxWidth: Layout.contentMaxWidth, maxHeight: .infinity, alignment: .top)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                                .opacity(isTrackpadSectionVisible ? 1 : 0)
-                                .animation(.easeInOut(duration: 0.35), value: isTrackpadSectionVisible)
-                                .allowsHitTesting(isTrackpadSectionVisible)
-                                .padding(.top, Layout.sectionSpacing)
-                            .padding(.horizontal, Layout.contentPadding)
-                            .padding(.bottom, Layout.verticalPadding)
+                                .padding(.bottom, Layout.verticalPadding)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .opacity(isConnectedContentVisible ? connectedScreenOpacity : 0)
+                            .allowsHitTesting(isConnectedContentVisible && connectedScreenOpacity > 0.01)
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .opacity(isConnectedContentVisible ? connectedScreenOpacity : 0)
-                        .allowsHitTesting(isConnectedContentVisible && connectedScreenOpacity > 0.01)
                     }
-                    .ignoresSafeArea(edges: .top)
+                    .ignoresSafeArea()
                 } else {
                     VStack(spacing: Layout.sectionSpacing) {
                         connectionPanel
@@ -299,6 +379,7 @@ private struct MacCenteredLogoOverlay: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .onAppear {
+            IMoteOrientationController.setImmersiveModeEnabled(isImmersiveLandscapeModeEnabled)
             previewZoomLevel = clampedZoom(previewZoomLevel)
             viewModel.setPreviewZoomLevel(previewZoomLevel)
             eyeCursorController.onMove = { deltaX, deltaY in
@@ -313,7 +394,9 @@ private struct MacCenteredLogoOverlay: View {
             }
         }
         .onDisappear {
+            IMoteOrientationController.setImmersiveModeEnabled(false)
             eyeCursorController.stop()
+            stopPreviewResyncMonitor()
         }
         .onChange(of: previewZoomLevel) { _, newValue in
             viewModel.setPreviewZoomLevel(newValue)
@@ -327,12 +410,26 @@ private struct MacCenteredLogoOverlay: View {
             }
             updateEyeCursorState()
         }
+        .onChange(of: isImmersiveLandscapeModeEnabled) { _, isEnabled in
+            IMoteOrientationController.setImmersiveModeEnabled(isEnabled)
+            guard showConnectedLayout || isDisconnectTransitionActive else { return }
+            // Keep preview visible when switching layout modes mid-session.
+            if isEnabled || viewModel.screenPreview.hasFrame {
+                isPreviewSectionVisible = true
+                isLivePreviewVisible = true
+            }
+            forcePreviewPipelineResync(reason: "immersiveToggle")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            handleOrientationDidChange()
+        }
         .onChange(of: viewModel.isPaired) { wasPaired, isPaired in
             updateEyeCursorState()
             if isPaired {
                 cancelDisconnectSequence()
                 beginConnectSequence()
             } else {
+                stopPreviewResyncMonitor()
                 if isControlledDisconnectFlow {
                     return
                 }
@@ -494,8 +591,11 @@ private struct MacCenteredLogoOverlay: View {
             preview: viewModel.screenPreview,
             zoomScale: CGFloat(previewZoomLevel),
             isAutoFollowEnabled: previewZoomLevel > 1.0,
-            isVirtualOverscanEnabled: isVirtualOverscanEnabled
+            isVirtualOverscanEnabled: isVirtualOverscanEnabled,
+            videoGravity: isImmersiveLandscapeModeEnabled ? .resizeAspect : .resizeAspectFill,
+            showsBlackBackdrop: isImmersiveLandscapeModeEnabled == false
         )
+        .id(previewSurfaceVersion)
         .simultaneousGesture(
             TapGesture().onEnded {
                 focusedField = nil
@@ -505,7 +605,15 @@ private struct MacCenteredLogoOverlay: View {
     }
 
     private var isConnectedContentVisible: Bool {
-        isPreviewSectionVisible || isStatsSectionVisible || isKeyboardSectionVisible || isTrackpadSectionVisible || isStartupOverlayVisible || isDisconnectPreviewOverlayVisible
+        showConnectedLayout
+            || isDisconnectTransitionActive
+            || isLivePreviewVisible
+            || isPreviewSectionVisible
+            || isStatsSectionVisible
+            || isKeyboardSectionVisible
+            || isTrackpadSectionVisible
+            || isStartupOverlayVisible
+            || isDisconnectPreviewOverlayVisible
     }
 
     private func beginConnectSequence() {
@@ -529,6 +637,7 @@ private struct MacCenteredLogoOverlay: View {
         isStatsSectionVisible = false
         isKeyboardSectionVisible = false
         isTrackpadSectionVisible = false
+        startPreviewResyncMonitor()
 
         startupTask = Task { @MainActor in
             withAnimation(.easeInOut(duration: 0.35)) {
@@ -620,6 +729,7 @@ private struct MacCenteredLogoOverlay: View {
         isStatsSectionVisible = false
         isKeyboardSectionVisible = false
         isTrackpadSectionVisible = false
+        stopPreviewResyncMonitor()
     }
 
     private func beginControlledDisconnectSequence(forgetDevice: Bool) {
@@ -716,6 +826,72 @@ private struct MacCenteredLogoOverlay: View {
         connectionScreenOpacity = 0
     }
 
+    private func startPreviewResyncMonitor() {
+        stopPreviewResyncMonitor()
+        lastPreviewResyncAt = nil
+        previewResyncTask = Task { @MainActor in
+            while Task.isCancelled == false {
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                guard Task.isCancelled == false else { return }
+                guard viewModel.isPaired else { continue }
+                guard showConnectedLayout || isDisconnectTransitionActive else { continue }
+                guard isStartupOverlayVisible == false, isDisconnectPreviewOverlayVisible == false else { continue }
+                guard isLivePreviewVisible else { continue }
+                guard viewModel.screenPreview.hasFrame else { continue }
+                guard let lastFrameDate = viewModel.screenPreview.lastFrameReceivedAt else { continue }
+
+                let frameStaleness = Date().timeIntervalSince(lastFrameDate)
+                guard frameStaleness >= 1.2 else { continue }
+
+                if let lastResync = lastPreviewResyncAt,
+                   Date().timeIntervalSince(lastResync) < 2.0 {
+                    continue
+                }
+
+                lastPreviewResyncAt = Date()
+                viewModel.requestStreamResync()
+
+                if frameStaleness >= 2.5 {
+                    previewSurfaceVersion &+= 1
+                    viewModel.screenPreview.displayBridge.flush()
+                }
+            }
+        }
+    }
+
+    private func handleOrientationDidChange() {
+        guard viewModel.isPaired else { return }
+        guard showConnectedLayout || isDisconnectTransitionActive else { return }
+        let now = Date()
+        if let last = lastOrientationResyncAt, now.timeIntervalSince(last) < 0.6 {
+            return
+        }
+        lastOrientationResyncAt = now
+        forcePreviewPipelineResync(reason: "orientationChange")
+    }
+
+    private func forcePreviewPipelineResync(reason: String) {
+        guard viewModel.isPaired else { return }
+        previewSurfaceVersion &+= 1
+        viewModel.requestLocalPreviewDecoderResync()
+        viewModel.screenPreview.displayBridge.flush()
+        viewModel.requestStreamResync()
+
+        if let missingSince = viewModel.screenPreview.displayBridge.missingLayerSince,
+           Date().timeIntervalSince(missingSince) >= 0.8 {
+            previewSurfaceVersion &+= 1
+            viewModel.screenPreview.displayBridge.flush()
+            viewModel.requestStreamResync()
+        }
+    }
+
+    private func stopPreviewResyncMonitor() {
+        previewResyncTask?.cancel()
+        previewResyncTask = nil
+        lastPreviewResyncAt = nil
+        lastOrientationResyncAt = nil
+    }
+
     private var previewStatsStrip: some View {
         PreviewStatsStripView(preview: viewModel.screenPreview) {
             focusedField = nil
@@ -759,6 +935,18 @@ private struct MacCenteredLogoOverlay: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Layout.fieldHorizontalPadding)
+            .padding(.vertical, Layout.fieldVerticalPadding)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+
+            HStack(spacing: 12) {
+                Text("Immersive landscape preview")
+                    .font(.footnote.weight(.semibold))
+                Spacer(minLength: 0)
+                Toggle("", isOn: $isImmersiveLandscapeModeEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
             .padding(.horizontal, Layout.fieldHorizontalPadding)
             .padding(.vertical, Layout.fieldVerticalPadding)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
@@ -1005,7 +1193,6 @@ private struct MacCenteredLogoOverlay: View {
     }
 
     private func updateEyeCursorState() {
-        print("[EyeCursor][ContentView] update state: experimental=\(isEyeCursorExperimentalEnabled) enabled=\(isEyeCursorEnabled) paired=\(viewModel.isPaired)")
         if isEyeCursorExperimentalEnabled && isEyeCursorEnabled && viewModel.isPaired {
             eyeCursorController.start()
         } else {

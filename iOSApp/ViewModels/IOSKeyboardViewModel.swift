@@ -291,6 +291,16 @@ final class IOSKeyboardViewModel: ObservableObject {
         client.sendStreamConfig(qualityMode: previewQualityMode, previewZoomLevel: previewZoomLevel)
     }
 
+    func requestStreamResync() {
+        guard isPaired else { return }
+        client.sendStreamResync()
+    }
+
+    func requestLocalPreviewDecoderResync() {
+        h264Decoder.forceResyncUsingLastConfig()
+        screenPreview.displayBridge.flush()
+    }
+
     func forgetTrustedSessionOnPhone() {
         hasTrustedSession = false
         pairingCode = ""

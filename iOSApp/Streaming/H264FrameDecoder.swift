@@ -11,11 +11,13 @@ final class H264FrameDecoder {
 
     private var formatDescription: CMFormatDescription?
     private var decompressionSession: VTDecompressionSession?
+    private var lastConfigPayload: Data?
     private var frameIndex: Int64 = 0
     private var decodeStartByFrameIndex: [Int64: CFAbsoluteTime] = [:]
     private let decodeStateLock = NSLock()
 
     func configure(with configPayload: Data) {
+        lastConfigPayload = configPayload
         guard let (sps, pps) = parseConfigPayload(configPayload) else {
             return
         }
@@ -52,6 +54,11 @@ final class H264FrameDecoder {
                 self.decodeStateLock.unlock()
             }
         }
+    }
+
+    func forceResyncUsingLastConfig() {
+        guard let lastConfigPayload else { return }
+        configure(with: lastConfigPayload)
     }
 
     func decode(framePayload: Data) {
