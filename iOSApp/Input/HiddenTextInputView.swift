@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import QuartzCore
 
 struct HiddenTextInputView: UIViewRepresentable {
     var isActive: Bool
@@ -12,6 +13,8 @@ struct HiddenTextInputView: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: HiddenTextInputView
+        private var lastAcceptedEditSignature: String?
+        private var lastAcceptedEditTime: CFTimeInterval = 0
 
         init(parent: HiddenTextInputView) {
             self.parent = parent
@@ -37,6 +40,10 @@ struct HiddenTextInputView: UIViewRepresentable {
                 if let backspaceTextView = textView as? BackspaceTextView {
                     backspaceTextView.moveCursorToEnd()
                 }
+                return false
+            }
+
+            if shouldSkipDuplicateEdit(range: range, replacementText: text) {
                 return false
             }
 
@@ -71,11 +78,23 @@ struct HiddenTextInputView: UIViewRepresentable {
                     backspaceTextView.clearPreview()
                 } else {
                     backspaceTextView.setPreviewText(nextText)
-                    backspaceTextView.scheduleAutoClear()
                 }
             }
 
             return false
+        }
+
+        private func shouldSkipDuplicateEdit(range: NSRange, replacementText: String) -> Bool {
+            let signature = "\(range.location):\(range.length):\(replacementText)"
+            let now = CACurrentMediaTime()
+            let isDuplicate = signature == lastAcceptedEditSignature && (now - lastAcceptedEditTime) < 0.12
+
+            if isDuplicate == false {
+                lastAcceptedEditSignature = signature
+                lastAcceptedEditTime = now
+            }
+
+            return isDuplicate
         }
 
         private func trailingWordAtTail(in value: String) -> String {
@@ -126,7 +145,7 @@ struct HiddenTextInputView: UIViewRepresentable {
         field.font = .monospacedSystemFont(ofSize: 17, weight: .regular)
         field.textAlignment = .left
         field.tintColor = .clear
-        field.textColor = .label
+        field.textColor = .white
         field.backgroundColor = .clear
         field.textContainerInset = .zero
         field.textContainer.lineFragmentPadding = 0
@@ -147,17 +166,14 @@ struct HiddenTextInputView: UIViewRepresentable {
                 context.coordinator.parent.onReturn()
                 if context.coordinator.parent.activeModifiers.contains(.shift) {
                     field.appendPreview("\n")
-                    field.scheduleAutoClear()
                 } else {
                     field.clearPreview()
                 }
             } else if key == .space {
                 context.coordinator.parent.onSpecialKey(key)
                 field.appendPreview(" ")
-                field.scheduleAutoClear()
             } else {
                 context.coordinator.parent.onSpecialKey(key)
-                field.scheduleAutoClear()
             }
             refocus()
         }
@@ -199,7 +215,6 @@ final class BackspaceTextView: UITextView {
             backspaceWhenEmptyHandler?()
         }
         super.deleteBackward()
-        scheduleAutoClear()
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
@@ -316,7 +331,7 @@ final class KeyboardAccessoryView: UIInputView {
     }
 
     private func setup() {
-        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
         blur.translatesAutoresizingMaskIntoConstraints = false
         blur.layer.cornerRadius = 12
         blur.clipsToBounds = true
@@ -398,7 +413,7 @@ final class KeyboardAccessoryView: UIInputView {
         var config = UIButton.Configuration.filled()
         config.title = title
         config.baseForegroundColor = .white
-        config.baseBackgroundColor = active ? .systemGreen : UIColor.systemGray3.withAlphaComponent(0.65)
+        config.baseBackgroundColor = active ? UIColor(white: 0.34, alpha: 1) : UIColor(white: 0.20, alpha: 0.95)
         config.cornerStyle = .capsule
         config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8)
         return config
@@ -408,7 +423,7 @@ final class KeyboardAccessoryView: UIInputView {
         var config = UIButton.Configuration.filled()
         config.title = title
         config.baseForegroundColor = .white
-        config.baseBackgroundColor = UIColor.systemBlue.withAlphaComponent(0.78)
+        config.baseBackgroundColor = UIColor(white: 0.30, alpha: 0.95)
         config.cornerStyle = .capsule
         config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6)
         return config

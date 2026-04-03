@@ -98,20 +98,19 @@ private struct PreviewStatsStripView: View {
         case pairingCode
     }
 
+    @Environment(\.colorScheme) private var colorScheme
+
     @ObservedObject var viewModel: IOSKeyboardViewModel
+    @AppStorage("preview.zoom.level") private var previewZoomLevel: Double = 2.5
+    @AppStorage("preview.quality.mode") private var previewQualityModeRaw: String = PreviewQualityMode.ultra.rawValue
     @State private var isTypingCaptureActive = false
-    @State private var previewZoomLevel: Double = 2.5
     @State private var isZoomSliderEditing = false
     @FocusState private var focusedField: Field?
 
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [
-                    Color(red: 0.16, green: 0.34, blue: 0.56).opacity(0.23),
-                    Color(red: 0.24, green: 0.48, blue: 0.66).opacity(0.17),
-                    Color(red: 0.25, green: 0.30, blue: 0.48).opacity(0.16)
-                ],
+                colors: backgroundGradientColors,
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -146,6 +145,12 @@ private struct PreviewStatsStripView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .onAppear {
+            previewZoomLevel = clampedZoom(previewZoomLevel)
+            if let storedQuality = PreviewQualityMode(rawValue: previewQualityModeRaw) {
+                viewModel.setPreviewQualityMode(storedQuality)
+            }
         }
     }
 
@@ -285,7 +290,7 @@ private struct PreviewStatsStripView: View {
                         get: { previewZoomLevel },
                         set: { newValue in
                             dismissTypingCapture()
-                            previewZoomLevel = newValue
+                            previewZoomLevel = clampedZoom(newValue)
                         }
                     ),
                     in: 1.0...3.0,
@@ -314,6 +319,7 @@ private struct PreviewStatsStripView: View {
                     get: { viewModel.previewQualityMode },
                     set: { newValue in
                         dismissTypingCapture()
+                        previewQualityModeRaw = newValue.rawValue
                         viewModel.setPreviewQualityMode(newValue)
                     }
                 )) {
@@ -342,10 +348,10 @@ private struct PreviewStatsStripView: View {
 
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.thinMaterial)
+                    .fill(colorScheme == .dark ? Color(red: 0.13, green: 0.13, blue: 0.14) : Color(red: 0.16, green: 0.16, blue: 0.17))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.3), lineWidth: 0.8)
+                            .stroke(colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.18), lineWidth: 0.8)
                     }
 
                 HiddenTextInputView(
@@ -389,7 +395,7 @@ private struct PreviewStatsStripView: View {
 
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.ultraThinMaterial)
+                    .fill(colorScheme == .dark ? Color(red: 0.22, green: 0.22, blue: 0.24) : Color(red: 0.74, green: 0.75, blue: 0.77))
 
                 TrackpadSurfaceView(
                     mouseScale: Layout.mouseMotionMultiplier,
@@ -450,6 +456,26 @@ private struct PreviewStatsStripView: View {
             .padding(.vertical, Layout.fieldVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+    }
+
+    private var backgroundGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color(red: 0.08, green: 0.09, blue: 0.10),
+                Color(red: 0.11, green: 0.12, blue: 0.14),
+                Color(red: 0.06, green: 0.07, blue: 0.08)
+            ]
+        }
+
+        return [
+            Color(red: 0.90, green: 0.91, blue: 0.92),
+            Color(red: 0.84, green: 0.85, blue: 0.87),
+            Color(red: 0.78, green: 0.79, blue: 0.81)
+        ]
+    }
+
+    private func clampedZoom(_ value: Double) -> Double {
+        min(3.0, max(1.0, value))
     }
 
     private func dismissTypingCapture() {

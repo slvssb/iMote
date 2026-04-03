@@ -70,7 +70,8 @@ final class KeyboardInjector {
         }
 
         let current = currentEvent.location
-        let rawNextPoint = CGPoint(x: current.x + deltaX, y: current.y - deltaY)
+        let adjustedDelta = adjustedEdgeAwareDelta(from: current, deltaX: deltaX, deltaY: deltaY)
+        let rawNextPoint = CGPoint(x: current.x + adjustedDelta.x, y: current.y - adjustedDelta.y)
         let nextPoint = clampedPointToActiveDisplays(rawNextPoint)
         guard let moveEvent = CGEvent(
             mouseEventSource: eventSource,
@@ -191,6 +192,52 @@ final class KeyboardInjector {
         keyUp.keyboardSetUnicodeString(stringLength: scalars.count, unicodeString: scalars)
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
+    }
+
+    private func adjustedEdgeAwareDelta(from current: CGPoint, deltaX: Double, deltaY: Double) -> CGPoint {
+        let bounds = activeDisplayBounds()
+        guard bounds.isNull == false, bounds.isEmpty == false else {
+            return CGPoint(x: deltaX, y: deltaY)
+        }
+
+        let edgeZone: CGFloat = 110
+        let leftDistance = max(0, current.x - bounds.minX)
+        let rightDistance = max(0, bounds.maxX - current.x)
+        let bottomDistance = max(0, current.y - bounds.minY)
+        let topDistance = max(0, bounds.maxY - current.y)
+
+        let xEdgeFactor = edgeFactor(min(leftDistance, rightDistance), zone: edgeZone)
+        let yEdgeFactor = edgeFactor(min(bottomDistance, topDistance), zone: edgeZone)
+
+        let isNearLeft = leftDistance < rightDistance
+        let isNearBottom = bottomDistance < topDistance
+
+        var adjustedX = deltaX
+        var adjustedY = deltaY
+
+        if xEdgeFactor > 0 {
+            let movingOutwardX = (isNearLeft && deltaX < 0) || (isNearLeft == false && deltaX > 0)
+            if movingOutwardX {
+                adjustedX *= (1 - (0.30 * xEdgeFactor))
+            }
+            adjustedY *= (1 + (0.22 * xEdgeFactor))
+        }
+
+        if yEdgeFactor > 0 {
+            let movingOutwardY = (isNearBottom && deltaY > 0) || (isNearBottom == false && deltaY < 0)
+            if movingOutwardY {
+                adjustedY *= (1 - (0.30 * yEdgeFactor))
+            }
+            adjustedX *= (1 + (0.22 * yEdgeFactor))
+        }
+
+        return CGPoint(x: adjustedX, y: adjustedY)
+    }
+
+    private func edgeFactor(_ distance: CGFloat, zone: CGFloat) -> Double {
+        guard zone > 0 else { return 0 }
+        let normalized = max(0, min(1, 1 - (distance / zone)))
+        return Double(normalized)
     }
 
     private func clampedPointToActiveDisplays(_ point: CGPoint) -> CGPoint {

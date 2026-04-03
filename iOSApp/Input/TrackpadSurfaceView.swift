@@ -26,6 +26,7 @@ struct TrackpadSurfaceView: UIViewRepresentable {
         uiView.mouseScale = mouseScale
         uiView.scrollScale = scrollScale
         uiView.isNaturalScrollingEnabled = isNaturalScrollingEnabled
+        uiView.refreshTheme()
     }
 }
 
@@ -51,11 +52,10 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
 
     private func configureGestures() {
         isMultipleTouchEnabled = true
-        backgroundColor = UIColor.secondarySystemFill.withAlphaComponent(0.45)
         layer.cornerRadius = 12
         layer.borderWidth = 0.8
-        layer.borderColor = UIColor.white.withAlphaComponent(0.28).cgColor
         clipsToBounds = true
+        refreshTheme()
 
         let oneFingerPan = UIPanGestureRecognizer(target: self, action: #selector(handleOneFingerPan(_:)))
         oneFingerPan.minimumNumberOfTouches = 1
@@ -163,6 +163,16 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
     @objc private func handleThreeFingerTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended {
             onClick?(.center, .tap)
+        }
+    }
+
+    func refreshTheme() {
+        if traitCollection.userInterfaceStyle == .dark {
+            backgroundColor = UIColor(red: 0.22, green: 0.22, blue: 0.24, alpha: 1)
+            layer.borderColor = UIColor.white.withAlphaComponent(0.16).cgColor
+        } else {
+            backgroundColor = UIColor(red: 0.73, green: 0.74, blue: 0.76, alpha: 1)
+            layer.borderColor = UIColor.white.withAlphaComponent(0.30).cgColor
         }
     }
 
