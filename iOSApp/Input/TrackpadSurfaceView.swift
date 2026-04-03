@@ -51,7 +51,11 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
 
     private func configureGestures() {
         isMultipleTouchEnabled = true
-        backgroundColor = .clear
+        backgroundColor = UIColor.secondarySystemFill.withAlphaComponent(0.45)
+        layer.cornerRadius = 12
+        layer.borderWidth = 0.8
+        layer.borderColor = UIColor.white.withAlphaComponent(0.28).cgColor
+        clipsToBounds = true
 
         let oneFingerPan = UIPanGestureRecognizer(target: self, action: #selector(handleOneFingerPan(_:)))
         oneFingerPan.minimumNumberOfTouches = 1

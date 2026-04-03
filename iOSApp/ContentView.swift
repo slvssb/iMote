@@ -1,22 +1,8 @@
 import SwiftUI
+import AVFoundation
+import UIKit
 
 struct ContentView: View {
-    private enum PreviewZoomLevel: String, CaseIterable, Identifiable {
-        case x15 = "1.5x"
-        case x20 = "2.0x"
-        case x25 = "2.5x"
-
-        var id: String { rawValue }
-
-        var scale: CGFloat {
-            switch self {
-            case .x15: return 1.5
-            case .x20: return 2.0
-            case .x25: return 2.5
-            }
-        }
-    }
-
     private enum Layout {
         static let sectionSpacing: CGFloat = 16
         static let panelSpacing: CGFloat = 14
@@ -31,14 +17,12 @@ struct ContentView: View {
         static let fieldVerticalPadding: CGFloat = 10
         static let statusSpacing: CGFloat = 4
         static let touchpadHeight: CGFloat = 210
-        static let screenPreviewHeight: CGFloat = 236
         static let mouseMotionMultiplier: Double = 1.45
         static let scrollMultiplier: Double = 1.2
     }
 
 private struct FixedScreenPreview: View {
     @ObservedObject var preview: ScreenPreviewState
-    let height: CGFloat
     let zoomScale: CGFloat
     let isAutoFollowEnabled: Bool
 
@@ -47,31 +31,66 @@ private struct FixedScreenPreview: View {
             Rectangle()
                 .fill(.black.opacity(0.8))
 
-            if let previewImage = preview.frameImage {
-                Image(uiImage: previewImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .scaleEffect(
-                        isAutoFollowEnabled ? zoomScale : 1,
-                        anchor: isAutoFollowEnabled ? preview.followAnchor : .center
-                    )
-                    .clipped()
-            } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "display.2")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.8))
-                    Text("Waiting for screen frames...")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.8))
-                }
+            SampleBufferPreviewView(bridge: preview.displayBridge)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .scaleEffect(
+                    isAutoFollowEnabled ? zoomScale : 1,
+                    anchor: isAutoFollowEnabled ? preview.followAnchor : .center
+                )
+                .clipped()
+
+            if preview.hasFrame == false {
+                Color.black.opacity(0.9)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
         }
         .frame(maxWidth: .infinity)
-        .frame(height: height)
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+    }
+}
+
+private struct SampleBufferPreviewView: UIViewRepresentable {
+    let bridge: SampleBufferDisplayBridge
+
+    func makeUIView(context: Context) -> SampleBufferDisplayLayerView {
+        let view = SampleBufferDisplayLayerView()
+        bridge.attach(layer: view.sampleBufferLayer)
+        return view
+    }
+
+    func updateUIView(_ uiView: SampleBufferDisplayLayerView, context: Context) {
+        bridge.attach(layer: uiView.sampleBufferLayer)
+    }
+}
+
+private final class SampleBufferDisplayLayerView: UIView {
+    override class var layerClass: AnyClass {
+        AVSampleBufferDisplayLayer.self
+    }
+
+    var sampleBufferLayer: AVSampleBufferDisplayLayer {
+        guard let layer = self.layer as? AVSampleBufferDisplayLayer else {
+            fatalError("Expected AVSampleBufferDisplayLayer backing layer")
+        }
+        return layer
+    }
+}
+
+private struct PreviewStatsStripView: View {
+    @ObservedObject var preview: ScreenPreviewState
+
+    var body: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Text(preview.statsLabel)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+            Spacer(minLength: 0)
+        }
     }
 }
 
@@ -81,9 +100,8 @@ private struct FixedScreenPreview: View {
 
     @ObservedObject var viewModel: IOSKeyboardViewModel
     @State private var isTypingCaptureActive = false
-    @State private var isNaturalScrollingEnabled = true
-    @State private var isAutoFollowEnabled = true
-    @State private var previewZoomLevel: PreviewZoomLevel = .x20
+    @State private var previewZoomLevel: Double = 2.5
+    @State private var isZoomSliderEditing = false
     @FocusState private var focusedField: Field?
 
     var body: some View {
@@ -102,34 +120,32 @@ private struct FixedScreenPreview: View {
             VStack(spacing: 0) {
                 if viewModel.isConnected {
                     fixedScreenPreview
-                        .zIndex(1)
-                }
 
-                ScrollView {
+                    previewStatsStrip
+                        .padding(.top, 10)
+                        .padding(.bottom, 10)
+
                     VStack(spacing: Layout.sectionSpacing) {
-                        if viewModel.isConnected {
-                            previewDebugStrip
-                            inputPanel
-                            mousePanel
-                        } else {
-                            connectionPanel
-                        }
+                        previewControlsPanel
+                        inputPanel
+                        mousePanel
+                            .frame(minHeight: Layout.touchpadHeight)
+                    }
+                    .frame(maxWidth: Layout.contentMaxWidth, alignment: .top)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .padding(.horizontal, Layout.contentPadding)
+                    .padding(.bottom, Layout.verticalPadding)
+                } else {
+                    VStack(spacing: Layout.sectionSpacing) {
+                        connectionPanel
                     }
                     .frame(maxWidth: Layout.contentMaxWidth)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding(.horizontal, Layout.contentPadding)
                     .padding(.vertical, Layout.verticalPadding)
                 }
-                .scrollDismissesKeyboard(.never)
-                .scrollDisabled(isTypingCaptureActive)
-                .ignoresSafeArea(.keyboard, edges: .bottom)
-                .clipped()
-                .zIndex(0)
-                .onTapGesture {
-                    focusedField = nil
-                    dismissTypingCapture()
-                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 
@@ -138,7 +154,6 @@ private struct FixedScreenPreview: View {
             VStack(alignment: .leading, spacing: Layout.panelSpacing) {
                 panelHeader(
                     title: "Remote Keyboard",
-                    subtitle: "Select your Mac and pair once to start streaming.",
                     badge: connectionBadgeText
                 )
 
@@ -224,197 +239,164 @@ private struct FixedScreenPreview: View {
     private var fixedScreenPreview: some View {
         FixedScreenPreview(
             preview: viewModel.screenPreview,
-            height: Layout.screenPreviewHeight,
-            zoomScale: previewZoomLevel.scale,
-            isAutoFollowEnabled: isAutoFollowEnabled
+            zoomScale: CGFloat(previewZoomLevel),
+            isAutoFollowEnabled: previewZoomLevel > 1.0
         )
     }
 
-    private var previewDebugStrip: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Text("Preview")
+    private var previewStatsStrip: some View {
+        PreviewStatsStripView(preview: viewModel.screenPreview)
+    }
+
+    private var previewControlsPanel: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("Zoom level")
+                        .font(.footnote.weight(.semibold))
+                    Text("\(previewZoomLevel, specifier: "%.1f")x")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Slider(
+                    value: Binding(
+                        get: { previewZoomLevel },
+                        set: { newValue in
+                            dismissTypingCapture()
+                            previewZoomLevel = newValue
+                        }
+                    ),
+                    in: 1.0...3.0,
+                    step: 0.5
+                ) {
+                    Text("Zoom level")
+                } minimumValueLabel: {
+                    Text("1.0x")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } maximumValueLabel: {
+                    Text("3.0x")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } onEditingChanged: { editing in
+                    isZoomSliderEditing = editing
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Preview quality")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
 
                 Picker("Preview Quality", selection: Binding(
                     get: { viewModel.previewQualityMode },
-                    set: { viewModel.setPreviewQualityMode($0) }
+                    set: { newValue in
+                        dismissTypingCapture()
+                        viewModel.setPreviewQualityMode(newValue)
+                    }
                 )) {
                     Text("Balanced").tag(PreviewQualityMode.balanced)
                     Text("Ultra").tag(PreviewQualityMode.ultra)
                 }
                 .pickerStyle(.segmented)
             }
-
-            Toggle("Auto-follow cursor", isOn: $isAutoFollowEnabled)
-                .toggleStyle(.switch)
-                .font(.footnote.weight(.semibold))
-
-            if isAutoFollowEnabled {
-                HStack(spacing: 10) {
-                    Text("Zoom")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Picker("Zoom Strength", selection: $previewZoomLevel) {
-                        ForEach(PreviewZoomLevel.allCases) { level in
-                            Text(level.rawValue).tag(level)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-            }
-
-            Text(viewModel.screenPreview.statsLabel)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+            .frame(maxWidth: 210, alignment: .leading)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var inputPanel: some View {
-        LiquidGlassPanel {
-            VStack(alignment: .leading, spacing: Layout.panelSpacing) {
-                panelHeader(
-                    title: "Keyboard Stream",
-                    subtitle: "Tap to focus. Toolbar modifiers and special keys remain active.",
-                    badge: isTypingCaptureActive ? "Focused" : "Idle"
-                )
+        VStack(alignment: .leading, spacing: Layout.panelSpacing) {
+            panelHeader(
+                title: "Keyboard Stream",
+                badge: isTypingCaptureActive ? "Focused" : "Idle"
+            )
 
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.thinMaterial)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.white.opacity(0.3), lineWidth: 0.8)
-                        }
-                    HiddenTextInputView(
-                        isActive: isTypingCaptureActive,
-                        activeModifiers: viewModel.activeModifiers,
-                        onCharacter: { character in
-                            viewModel.handleCharacter(character)
-                        },
-                        onBackspace: {
-                            viewModel.handleBackspace()
-                        },
-                        onReturn: {
-                            viewModel.handleReturn()
-                        },
-                        onToggleModifier: { modifier in
-                            viewModel.toggleModifier(modifier)
-                        },
-                        onSpecialKey: { key in
-                            viewModel.sendNamedKey(key)
-                        }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                }
-                .frame(height: 128)
-                .highPriorityGesture(
-                    TapGesture().onEnded {
-                        focusedField = nil
-                        isTypingCaptureActive = true
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.thinMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 0.8)
+                    }
+
+                HiddenTextInputView(
+                    isActive: isTypingCaptureActive,
+                    activeModifiers: viewModel.activeModifiers,
+                    onCharacter: { character in
+                        viewModel.handleCharacter(character)
+                    },
+                    onBackspace: {
+                        viewModel.handleBackspace()
+                    },
+                    onReturn: {
+                        viewModel.handleReturn()
+                    },
+                    onToggleModifier: { modifier in
+                        viewModel.toggleModifier(modifier)
+                    },
+                    onSpecialKey: { key in
+                        viewModel.sendNamedKey(key)
                     }
                 )
-
-                Text("Tap the stream field to type. Input sends incrementally and clears after 3 seconds idle.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if viewModel.activeModifiers.isEmpty == false {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Active Modifiers")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(viewModel.activeModifiers.map(\.rawValue).joined(separator: ", "))
-                            .font(.caption)
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(.thinMaterial, in: Capsule(style: .continuous))
-                    }
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
+            .frame(height: 128)
+            .highPriorityGesture(
+                TapGesture().onEnded {
+                    focusedField = nil
+                    isTypingCaptureActive = true
+                }
+            )
+
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var mousePanel: some View {
-        LiquidGlassPanel {
-            VStack(alignment: .leading, spacing: Layout.panelSpacing) {
-                panelHeader(
-                    title: "Mouse Control",
-                    subtitle: "1-finger tap: left click, 2-finger tap: right click, 3-finger tap: middle click.",
-                    badge: "Trackpad"
-                )
+        VStack(alignment: .leading, spacing: Layout.panelSpacing) {
+            panelHeader(
+                title: "Mouse Control",
+                badge: "Trackpad"
+            )
 
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.thinMaterial)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.white.opacity(0.3), lineWidth: 0.8)
-                        }
-
-                    TrackpadSurfaceView(
-                        mouseScale: Layout.mouseMotionMultiplier,
-                        scrollScale: Layout.scrollMultiplier,
-                        isNaturalScrollingEnabled: isNaturalScrollingEnabled,
-                        onMove: { deltaX, deltaY in
-                            viewModel.moveMouse(deltaX: deltaX, deltaY: deltaY)
-                        },
-                        onScroll: { deltaX, deltaY in
-                            viewModel.scrollMouse(deltaX: deltaX, deltaY: deltaY)
-                        },
-                        onClick: { button, action in
-                            viewModel.clickMouse(button: button, action: action)
-                        }
-                    )
-
-                    VStack(spacing: 8) {
-                        Image(systemName: "hand.draw")
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .allowsHitTesting(false)
-                        Text("Trackpad Surface")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .allowsHitTesting(false)
-                    }
+            TrackpadSurfaceView(
+                mouseScale: Layout.mouseMotionMultiplier,
+                scrollScale: Layout.scrollMultiplier,
+                isNaturalScrollingEnabled: false,
+                onMove: { deltaX, deltaY in
+                    viewModel.moveMouse(deltaX: deltaX, deltaY: deltaY)
+                },
+                onScroll: { deltaX, deltaY in
+                    viewModel.scrollMouse(deltaX: deltaX, deltaY: deltaY)
+                },
+                onClick: { button, action in
+                    viewModel.clickMouse(button: button, action: action)
                 }
-                .frame(height: Layout.touchpadHeight)
-
-                Toggle("Natural Scrolling", isOn: $isNaturalScrollingEnabled)
-                    .toggleStyle(.switch)
-                    .font(.footnote.weight(.semibold))
-
-                Text("1-finger drag: move cursor • 2-finger drag: scroll • 3-finger drag: hold and drag")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            )
+            .frame(maxWidth: .infinity)
+            .frame(maxHeight: .infinity)
+            .frame(minHeight: 160)
         }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                dismissTypingCapture()
+            }
+        )
     }
 
-    private func panelHeader(title: String, subtitle: String, badge: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center) {
-                Text(title)
-                    .font(.title3.weight(.semibold))
-                Spacer()
-                Text(badge)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(.thinMaterial, in: Capsule(style: .continuous))
-            }
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private func panelHeader(title: String, badge: String) -> some View {
+        HStack(alignment: .center) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+            Spacer()
+            Text(badge)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.thinMaterial, in: Capsule(style: .continuous))
         }
     }
 
@@ -449,4 +431,3 @@ private struct FixedScreenPreview: View {
         )
     }
 }
-

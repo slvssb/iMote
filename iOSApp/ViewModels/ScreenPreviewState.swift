@@ -1,17 +1,21 @@
 import Combine
+import AVFoundation
 import Foundation
 import SwiftUI
 import UIKit
 
 @MainActor
 final class ScreenPreviewState: ObservableObject {
-    @Published var frameImage: UIImage?
+    @Published private(set) var hasFrame = false
     @Published var statsLabel = "No frames yet"
     @Published private(set) var followAnchor = UnitPoint.center
+    let displayBridge = SampleBufferDisplayBridge()
 
     let zoomScale: CGFloat = 2.2
 
     private var frameTimestamps: [Date] = []
+    private var smoothedFPS: Double?
+    private var smoothedDecodeLatencyMs: Double?
     private var timerCancellable: AnyCancellable?
 
     init() {
@@ -23,10 +27,13 @@ final class ScreenPreviewState: ObservableObject {
     }
 
     func reset() {
-        frameImage = nil
+        hasFrame = false
         frameTimestamps.removeAll()
         statsLabel = "No frames yet"
         followAnchor = .center
+        smoothedFPS = nil
+        smoothedDecodeLatencyMs = nil
+        displayBridge.flush()
     }
 
     func consumeFrameData(_ data: Data) {
@@ -35,7 +42,14 @@ final class ScreenPreviewState: ObservableObject {
     }
 
     func consumeFrameImage(_ image: UIImage) {
-        frameImage = image
+        _ = image
+        hasFrame = true
+        recordArrival()
+    }
+
+    func consumeDecodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        hasFrame = true
+        displayBridge.enqueue(sampleBuffer)
         recordArrival()
     }
 
@@ -47,6 +61,16 @@ final class ScreenPreviewState: ObservableObject {
         let nextX = followAnchor.x + (clampedX - followAnchor.x) * alpha
         let nextY = followAnchor.y + (clampedY - followAnchor.y) * alpha
         followAnchor = UnitPoint(x: nextX, y: nextY)
+    }
+
+    func updateDecodeLatency(ms: Double) {
+        if let current = smoothedDecodeLatencyMs {
+            // Smooth noisy frame-to-frame decode times for a stable strip.
+            smoothedDecodeLatencyMs = (current * 0.75) + (ms * 0.25)
+        } else {
+            smoothedDecodeLatencyMs = ms
+        }
+        updateStatsLabel()
     }
 
     private func recordArrival() {
@@ -67,8 +91,38 @@ final class ScreenPreviewState: ObservableObject {
         let cutoff = now.addingTimeInterval(-5)
         frameTimestamps.removeAll { $0 < cutoff }
 
-        let fps = frameTimestamps.filter { $0 >= now.addingTimeInterval(-1) }.count
+        let instantFPS = Double(frameTimestamps.filter { $0 >= now.addingTimeInterval(-1) }.count)
+        if let current = smoothedFPS {
+            smoothedFPS = (current * 0.7) + (instantFPS * 0.3)
+        } else {
+            smoothedFPS = instantFPS
+        }
+
+        let fps = Int((smoothedFPS ?? instantFPS).rounded())
         let ageMs = Int(now.timeIntervalSince(last) * 1000)
-        statsLabel = "~\(fps) fps • last frame \(ageMs) ms ago"
+        let decodeMs = Int((smoothedDecodeLatencyMs ?? 0).rounded())
+        statsLabel = "~\(fps) fps • decode \(decodeMs) ms • render \(ageMs) ms"
+    }
+}
+
+@MainActor
+final class SampleBufferDisplayBridge {
+    weak var displayLayer: AVSampleBufferDisplayLayer?
+
+    func attach(layer: AVSampleBufferDisplayLayer) {
+        displayLayer = layer
+        layer.videoGravity = .resizeAspectFill
+    }
+
+    func enqueue(_ sampleBuffer: CMSampleBuffer) {
+        guard let layer = displayLayer else { return }
+        if layer.status == .failed {
+            layer.flushAndRemoveImage()
+        }
+        layer.enqueue(sampleBuffer)
+    }
+
+    func flush() {
+        displayLayer?.flushAndRemoveImage()
     }
 }

@@ -4,6 +4,9 @@ import Foundation
 import Network
 
 final class MacWebSocketServer: @unchecked Sendable {
+    private static let frameIntervalNanos: UInt64 = 16_666_667
+    private static let adaptiveWindowTicks = 60
+
     struct ClientSnapshot: Sendable {
         let id: UUID
         let deviceName: String?
@@ -33,6 +36,10 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var consecutiveFrameFailures = 0
     private var previewQualityMode: PreviewQualityMode = .ultra
     private var previewCaptureMaxWidth: CGFloat = 1920
+    private var adaptiveBitrateScale: Double = 1.0
+    private var adaptiveWindowTickCount = 0
+    private var adaptiveWindowSkippedCount = 0
+    private var adaptiveWindowEncodedCount = 0
 
     init(pairingManager: PairingManager, injector: KeyboardInjector) {
         self.pairingManager = pairingManager
@@ -112,6 +119,9 @@ final class MacWebSocketServer: @unchecked Sendable {
             self.listener?.cancel()
             self.listener = nil
             self.stopFrameBroadcasting()
+            Task { [weak self] in
+                await self?.screenCaptureProvider.stopCapture()
+            }
             self.h264Encoder.stop()
             self.publishClients()
         }
@@ -363,8 +373,17 @@ final class MacWebSocketServer: @unchecked Sendable {
     private func startFrameBroadcasting() {
         guard frameTimer == nil else { return }
 
+        adaptiveBitrateScale = 1.0
+        adaptiveWindowTickCount = 0
+        adaptiveWindowSkippedCount = 0
+        adaptiveWindowEncodedCount = 0
+        h264Encoder.setAdaptiveBitrateScale(adaptiveBitrateScale)
+
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + .milliseconds(120), repeating: .milliseconds(33))
+        timer.schedule(
+            deadline: .now() + .milliseconds(120),
+            repeating: .nanoseconds(Int(Self.frameIntervalNanos))
+        )
         timer.setEventHandler { [weak self] in
             self?.broadcastScreenFrame()
         }
@@ -383,12 +402,17 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard pairedClientIDs.isEmpty == false else { return }
-        guard isFrameCaptureInFlight == false else { return }
+        adaptiveWindowTickCount += 1
+        guard isFrameCaptureInFlight == false else {
+            adaptiveWindowSkippedCount += 1
+            updateAdaptiveBitrateIfNeeded()
+            return
+        }
         isFrameCaptureInFlight = true
 
         Task { [weak self] in
             guard let self else { return }
-            let frameImage = await self.screenCaptureProvider.makeFrameImage(maxWidth: self.previewCaptureMaxWidth)
+            let framePixelBuffer = await self.screenCaptureProvider.makeFramePixelBuffer(maxWidth: self.previewCaptureMaxWidth)
             let cursorPosition = await self.screenCaptureProvider.normalizedCursorPosition()
             self.queue.async { [weak self] in
                 guard let self else { return }
@@ -404,8 +428,9 @@ final class MacWebSocketServer: @unchecked Sendable {
                     }
                 }
 
-                guard let frameImage else {
+                guard let framePixelBuffer else {
                     self.consecutiveFrameFailures += 1
+                    self.updateAdaptiveBitrateIfNeeded()
                     if self.consecutiveFrameFailures % 30 == 0 {
                         self.reportError("Screen preview capture failed repeatedly. Confirm Screen Recording permission for the Mac app.")
                     }
@@ -413,9 +438,37 @@ final class MacWebSocketServer: @unchecked Sendable {
                 }
 
                 self.consecutiveFrameFailures = 0
-                self.h264Encoder.encode(cgImage: frameImage)
+                self.h264Encoder.encode(pixelBuffer: framePixelBuffer.value)
+                self.adaptiveWindowEncodedCount += 1
+                self.updateAdaptiveBitrateIfNeeded()
             }
         }
+    }
+
+    private func updateAdaptiveBitrateIfNeeded() {
+        guard adaptiveWindowTickCount >= Self.adaptiveWindowTicks else { return }
+
+        let skipRatio = Double(adaptiveWindowSkippedCount) / Double(adaptiveWindowTickCount)
+        let encodedRatio = Double(adaptiveWindowEncodedCount) / Double(adaptiveWindowTickCount)
+
+        var nextScale = adaptiveBitrateScale
+        if consecutiveFrameFailures > 3 || skipRatio > 0.25 {
+            nextScale -= 0.15
+        } else if skipRatio > 0.12 {
+            nextScale -= 0.08
+        } else if skipRatio < 0.03, encodedRatio > 0.9, consecutiveFrameFailures == 0 {
+            nextScale += 0.05
+        }
+
+        nextScale = min(max(nextScale, 0.45), 1.0)
+        if abs(nextScale - adaptiveBitrateScale) > 0.01 {
+            adaptiveBitrateScale = nextScale
+            h264Encoder.setAdaptiveBitrateScale(adaptiveBitrateScale)
+        }
+
+        adaptiveWindowTickCount = 0
+        adaptiveWindowSkippedCount = 0
+        adaptiveWindowEncodedCount = 0
     }
 
     private func reportError(_ reason: String) {

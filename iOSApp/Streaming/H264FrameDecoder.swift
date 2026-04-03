@@ -1,15 +1,19 @@
 import CoreMedia
 import CoreVideo
 import Foundation
-import UIKit
 import VideoToolbox
 
 final class H264FrameDecoder {
-    var onImage: ((UIImage) -> Void)?
+    private static let targetFPS = 60
+
+    var onSampleBuffer: ((CMSampleBuffer) -> Void)?
+    var onDecodeLatency: ((Double) -> Void)?
 
     private var formatDescription: CMFormatDescription?
     private var decompressionSession: VTDecompressionSession?
     private var frameIndex: Int64 = 0
+    private var decodeStartByFrameIndex: [Int64: CFAbsoluteTime] = [:]
+    private let decodeStateLock = NSLock()
 
     func configure(with configPayload: Data) {
         guard let (sps, pps) = parseConfigPayload(configPayload) else {
@@ -43,6 +47,9 @@ final class H264FrameDecoder {
                 self.formatDescription = formatDescriptionOut
                 self.recreateDecompressionSession(formatDescriptionOut)
                 self.frameIndex = 0
+                self.decodeStateLock.lock()
+                self.decodeStartByFrameIndex.removeAll()
+                self.decodeStateLock.unlock()
             }
         }
     }
@@ -81,9 +88,10 @@ final class H264FrameDecoder {
             )
         }
 
+        let currentFrameIndex = frameIndex
         var timing = CMSampleTimingInfo(
             duration: .invalid,
-            presentationTimeStamp: CMTime(value: frameIndex, timescale: 30),
+            presentationTimeStamp: CMTime(value: currentFrameIndex, timescale: CMTimeScale(Self.targetFPS)),
             decodeTimeStamp: .invalid
         )
 
@@ -106,17 +114,21 @@ final class H264FrameDecoder {
             return
         }
 
+        markFrameDecodeStart(index: currentFrameIndex)
         frameIndex += 1
 
         let flags = VTDecodeFrameFlags._EnableAsynchronousDecompression
         var infoFlags = VTDecodeInfoFlags()
-        VTDecompressionSessionDecodeFrame(
+        let decodeStatus = VTDecompressionSessionDecodeFrame(
             decompressionSession,
             sampleBuffer: sampleBuffer,
             flags: flags,
             frameRefcon: nil,
             infoFlagsOut: &infoFlags
         )
+        if decodeStatus != noErr {
+            clearFrameDecodeStart(index: currentFrameIndex)
+        }
     }
 
     private func recreateDecompressionSession(_ formatDescription: CMFormatDescription) {
@@ -162,27 +174,85 @@ final class H264FrameDecoder {
         return (sps, pps)
     }
 
-    fileprivate func emitImage(_ image: UIImage) {
-        onImage?(image)
+    fileprivate func emitSampleBuffer(_ sampleBuffer: CMSampleBuffer, frameIndex: Int64?) {
+        if let frameIndex,
+           let latencyMs = consumeFrameDecodeLatency(index: frameIndex) {
+            onDecodeLatency?(latencyMs)
+        }
+        onSampleBuffer?(sampleBuffer)
+    }
+
+    private func markFrameDecodeStart(index: Int64) {
+        decodeStateLock.lock()
+        decodeStartByFrameIndex[index] = CFAbsoluteTimeGetCurrent()
+        decodeStateLock.unlock()
+    }
+
+    private func clearFrameDecodeStart(index: Int64) {
+        decodeStateLock.lock()
+        decodeStartByFrameIndex.removeValue(forKey: index)
+        decodeStateLock.unlock()
+    }
+
+    private func consumeFrameDecodeLatency(index: Int64) -> Double? {
+        decodeStateLock.lock()
+        let startedAt = decodeStartByFrameIndex.removeValue(forKey: index)
+        decodeStateLock.unlock()
+        guard let startedAt else { return nil }
+        return (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
     }
 }
 
-private let decompressionOutputCallback: VTDecompressionOutputCallback = { refCon, _, status, _, imageBuffer, _, _ in
+private let decompressionOutputCallback: VTDecompressionOutputCallback = { refCon, _, status, _, imageBuffer, presentationTimeStamp, _ in
     guard status == noErr,
           let refCon,
           let imageBuffer else {
         return
     }
 
-    var cgImage: CGImage?
-    let cgStatus = VTCreateCGImageFromCVPixelBuffer(imageBuffer, options: nil, imageOut: &cgImage)
-    guard cgStatus == noErr, let cgImage else {
+    var formatDescription: CMVideoFormatDescription?
+    let formatStatus = CMVideoFormatDescriptionCreateForImageBuffer(
+        allocator: kCFAllocatorDefault,
+        imageBuffer: imageBuffer,
+        formatDescriptionOut: &formatDescription
+    )
+    guard formatStatus == noErr,
+          let formatDescription else {
         return
     }
 
-    let image = UIImage(cgImage: cgImage)
+    var timingInfo = CMSampleTimingInfo(
+        duration: .invalid,
+        presentationTimeStamp: .invalid,
+        decodeTimeStamp: .invalid
+    )
+    var outputSampleBuffer: CMSampleBuffer?
+    let sampleStatus = CMSampleBufferCreateReadyWithImageBuffer(
+        allocator: kCFAllocatorDefault,
+        imageBuffer: imageBuffer,
+        formatDescription: formatDescription,
+        sampleTiming: &timingInfo,
+        sampleBufferOut: &outputSampleBuffer
+    )
+    guard sampleStatus == noErr,
+          let outputSampleBuffer else {
+        return
+    }
+
+    if let attachments = CMSampleBufferGetSampleAttachmentsArray(outputSampleBuffer, createIfNecessary: true),
+       CFArrayGetCount(attachments) > 0 {
+        let dictionaryPointer = CFArrayGetValueAtIndex(attachments, 0)
+        let dictionary = unsafeBitCast(dictionaryPointer, to: CFMutableDictionary.self)
+        CFDictionarySetValue(
+            dictionary,
+            Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+            Unmanaged.passUnretained(kCFBooleanTrue).toOpaque()
+        )
+    }
+
     let decoder = Unmanaged<H264FrameDecoder>.fromOpaque(refCon).takeUnretainedValue()
-    decoder.emitImage(image)
+    let outputFrameIndex = presentationTimeStamp.isValid ? presentationTimeStamp.value : nil
+    decoder.emitSampleBuffer(outputSampleBuffer, frameIndex: outputFrameIndex)
 }
 
 private extension Data {

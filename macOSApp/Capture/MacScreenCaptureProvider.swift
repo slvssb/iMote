@@ -1,15 +1,28 @@
 import AppKit
 import CoreGraphics
+import CoreMedia
+import CoreVideo
 import Foundation
 import ScreenCaptureKit
 
+struct CapturedPixelBuffer: @unchecked Sendable {
+    let value: CVPixelBuffer
+}
+
 actor MacScreenCaptureProvider {
+    private static let targetFPS: Int32 = 60
+
     private var contentFilter: SCContentFilter?
     private var sourceWidth: CGFloat = 0
     private var sourceHeight: CGFloat = 0
     private var displayFrame: CGRect = .zero
+    private var stream: SCStream?
+    private var streamOutput: StreamOutput?
+    private let outputQueue = DispatchQueue(label: "remote.keyboard.capture.output")
+    private var latestPixelBuffer: CapturedPixelBuffer?
+    private var activeMaxWidth: CGFloat = 0
 
-    func makeFrameImage(maxWidth: CGFloat = 1920) async -> CGImage? {
+    func makeFramePixelBuffer(maxWidth: CGFloat = 1920) async -> CapturedPixelBuffer? {
         do {
             if contentFilter == nil {
                 try await prepareCaptureFilter()
@@ -21,15 +34,24 @@ actor MacScreenCaptureProvider {
                 return nil
             }
 
-            let scale = min(1.0, maxWidth / sourceWidth)
-            let config = SCStreamConfiguration()
-            config.width = Int(sourceWidth * scale)
-            config.height = Int(sourceHeight * scale)
-
-            return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+            try await ensureCaptureStream(filter: filter, maxWidth: maxWidth)
+            return latestPixelBuffer
         } catch {
             return nil
         }
+    }
+
+    func stopCapture() async {
+        if let stream {
+            try? await stream.stopCapture()
+            if let streamOutput {
+                try? stream.removeStreamOutput(streamOutput, type: .screen)
+            }
+        }
+        self.stream = nil
+        self.streamOutput = nil
+        self.latestPixelBuffer = nil
+        self.activeMaxWidth = 0
     }
 
     func normalizedCursorPosition() -> CGPoint? {
@@ -54,5 +76,64 @@ actor MacScreenCaptureProvider {
         sourceHeight = CGFloat(display.height)
         displayFrame = display.frame
         contentFilter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+    }
+
+    private func ensureCaptureStream(filter: SCContentFilter, maxWidth: CGFloat) async throws {
+        if stream == nil || abs(activeMaxWidth - maxWidth) > 0.5 {
+            try await rebuildCaptureStream(filter: filter, maxWidth: maxWidth)
+        }
+    }
+
+    private func rebuildCaptureStream(filter: SCContentFilter, maxWidth: CGFloat) async throws {
+        if let stream {
+            try? await stream.stopCapture()
+            if let streamOutput {
+                try? stream.removeStreamOutput(streamOutput, type: .screen)
+            }
+        }
+
+        let scale = min(1.0, maxWidth / sourceWidth)
+        let config = SCStreamConfiguration()
+        config.width = max(1, Int(sourceWidth * scale))
+        config.height = max(1, Int(sourceHeight * scale))
+        config.minimumFrameInterval = CMTime(value: 1, timescale: Self.targetFPS)
+        config.queueDepth = 8
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.showsCursor = true
+
+        let streamOutput = StreamOutput(owner: self)
+        let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+        try stream.addStreamOutput(streamOutput, type: .screen, sampleHandlerQueue: outputQueue)
+        try await stream.startCapture()
+
+        self.stream = stream
+        self.streamOutput = streamOutput
+        self.activeMaxWidth = maxWidth
+    }
+
+    fileprivate func consumeFrame(_ pixelBuffer: CapturedPixelBuffer) {
+        latestPixelBuffer = pixelBuffer
+    }
+}
+private final class StreamOutput: NSObject, SCStreamOutput {
+    private weak var owner: MacScreenCaptureProvider?
+
+    init(owner: MacScreenCaptureProvider) {
+        self.owner = owner
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+        guard outputType == .screen,
+              sampleBuffer.isValid,
+              CMSampleBufferDataIsReady(sampleBuffer),
+              let imageBuffer = sampleBuffer.imageBuffer else {
+            return
+        }
+        guard let owner else { return }
+
+        let frame = CapturedPixelBuffer(value: imageBuffer)
+        Task {
+            await owner.consumeFrame(frame)
+        }
     }
 }

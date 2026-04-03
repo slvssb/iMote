@@ -101,9 +101,15 @@ final class IOSKeyboardViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        h264Decoder.onImage = { [weak self] image in
+        h264Decoder.onSampleBuffer = { [weak self] sampleBuffer in
             Task { @MainActor [weak self] in
-                self?.screenPreview.consumeFrameImage(image)
+                self?.screenPreview.consumeDecodedSampleBuffer(sampleBuffer)
+            }
+        }
+
+        h264Decoder.onDecodeLatency = { [weak self] latencyMs in
+            Task { @MainActor [weak self] in
+                self?.screenPreview.updateDecodeLatency(ms: latencyMs)
             }
         }
 
@@ -180,7 +186,11 @@ final class IOSKeyboardViewModel: ObservableObject {
         let modifiers = Array(activeModifiers)
 
         if modifiers.isEmpty {
-            client.sendText(value)
+            if let shiftedBaseKey = shiftedBaseKey(for: character) {
+                client.sendKey(shiftedBaseKey, modifiers: [.shift], action: .tap)
+            } else {
+                client.sendText(value)
+            }
             return
         }
 
@@ -216,6 +226,23 @@ final class IOSKeyboardViewModel: ObservableObject {
         guard previewQualityMode != mode else { return }
         previewQualityMode = mode
         client.sendStreamConfig(qualityMode: mode)
+    }
+
+    private func shiftedBaseKey(for character: Character) -> String? {
+        let value = String(character)
+
+        if value.count == 1,
+           let scalar = value.unicodeScalars.first,
+           CharacterSet.uppercaseLetters.contains(scalar) {
+            return value.lowercased()
+        }
+
+        let shiftedSymbolMap: [Character: String] = [
+            "~": "`", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
+            "_": "-", "+": "=", "{": "[", "}": "]", "|": "\\", ":": ";", "\"": "'", "<": ",", ">": ".", "?": "/"
+        ]
+
+        return shiftedSymbolMap[character]
     }
 
     private func normalizeKeyCharacter(_ character: Character) -> String {
