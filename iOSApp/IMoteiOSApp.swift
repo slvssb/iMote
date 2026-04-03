@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct RemoteKeyboardiOSApp: App {
+struct IMoteiOSApp: App {
     @StateObject private var viewModel = IOSKeyboardViewModel()
 
     var body: some Scene {

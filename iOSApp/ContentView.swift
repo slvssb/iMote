@@ -225,7 +225,7 @@ private struct PreviewStatsStripView: View {
                     Text("Disconnected")
                         .font(.title2.weight(.bold))
                 }
-                Text("Connect your iPhone to your Mac to start keyboard and trackpad control.")
+                Text("iMote: control your Mac from your iPhone")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Text("Choose your Mac host and enter the 6-digit pairing code.")

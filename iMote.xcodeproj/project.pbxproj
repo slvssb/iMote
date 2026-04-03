@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		08178A2F295E114B347611F3 /* AccessibilityPermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE70ED41600E3174B32D10F7 /* AccessibilityPermissionManager.swift */; };
 		185671B290F060D34E4FD573 /* KeyboardKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48B64DEDE8DA2202F1905FB6 /* KeyboardKey.swift */; };
+		A1B2C3D4E5F6012345678901 /* iMote.icon in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6012345678903 /* iMote.icon */; };
+		A1B2C3D4E5F6012345678902 /* iMote.icon in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6012345678903 /* iMote.icon */; };
 		3261C6035CBC1C82644C0DF8 /* IOSWebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4475252E2ACD2E5D3553A12B /* IOSWebSocketClient.swift */; };
 		3413DD7E2F7F041C0086D1D8 /* TrackpadSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD7D2F7F041C0086D1D8 /* TrackpadSurfaceView.swift */; };
 		3413DD812F7F058C0086D1D8 /* MacScreenCaptureProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD802F7F058C0086D1D8 /* MacScreenCaptureProvider.swift */; };
@@ -19,12 +21,12 @@
 		388C9DE262521143AD7A098B /* KeyCodeMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A4ED6A00C3BE9BCC77CFA0 /* KeyCodeMapper.swift */; };
 		3AE8844EF95C010D3EDD1BB5 /* KeyboardInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B5A789ADC802F2FFA34809 /* KeyboardInjector.swift */; };
 		3B321DF188E6DA67E424EA2C /* RemoteKeyboardProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */; };
-		445C07A61D1EC7EB1CD08D99 /* RemoteKeyboardMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 889865EECE778A1590EAFE31 /* RemoteKeyboardMacApp.swift */; };
+		445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 889865EECE778A1590EAFE31 /* IMoteMacApp.swift */; };
 		46D6A68727A71EEA2AD55B25 /* MenuBarMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD75AE3DD9183B8564B32359 /* MenuBarMenuView.swift */; };
 		4A93D86DF6015B98A2392104 /* IOSKeyboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA105BD98FA3EEC61C2743EA /* IOSKeyboardViewModel.swift */; };
 		4E6BE1C50B306B72DF0503D5 /* BonjourServiceBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF2249F384A3961E513C070 /* BonjourServiceBrowser.swift */; };
 		52A766052B849140BB2B6021 /* MacAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7803AE636C3EA2E530381324 /* MacAppState.swift */; };
-		5BA8D4731CB7DD70F5E2BAE7 /* RemoteKeyboardiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30B15F95157EBCD2481742E /* RemoteKeyboardiOSApp.swift */; };
+		5BA8D4731CB7DD70F5E2BAE7 /* IMoteiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30B15F95157EBCD2481742E /* IMoteiOSApp.swift */; };
 		7B495C10B03F7C21BC7B604F /* PairingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 157FB361B8274C2A96AC5742 /* PairingManager.swift */; };
 		7BBE0F435484393B42B37307 /* HiddenTextInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19235F060002223B9FF83C41 /* HiddenTextInputView.swift */; };
 		BAB45B3ADCC83FC094122A83 /* MacWebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8653253EC541A234D5C4AA /* MacWebSocketServer.swift */; };
@@ -48,11 +50,12 @@
 		3D8653253EC541A234D5C4AA /* MacWebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacWebSocketServer.swift; sourceTree = "<group>"; };
 		4475252E2ACD2E5D3553A12B /* IOSWebSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSWebSocketClient.swift; sourceTree = "<group>"; };
 		48B64DEDE8DA2202F1905FB6 /* KeyboardKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardKey.swift; sourceTree = "<group>"; };
-		5F376848EB6CBFB125129B9B /* iPhoneKeyboard-iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "iPhoneKeyboard-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5F376848EB6CBFB125129B9B /* iMote-iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "iMote-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		7803AE636C3EA2E530381324 /* MacAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAppState.swift; sourceTree = "<group>"; };
-		889865EECE778A1590EAFE31 /* RemoteKeyboardMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteKeyboardMacApp.swift; sourceTree = "<group>"; };
-		9DF57A29843913DBAB638AE4 /* iPhoneKeyboard-Mac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "iPhoneKeyboard-Mac.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		A30B15F95157EBCD2481742E /* RemoteKeyboardiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteKeyboardiOSApp.swift; sourceTree = "<group>"; };
+		889865EECE778A1590EAFE31 /* IMoteMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMoteMacApp.swift; sourceTree = "<group>"; };
+		9DF57A29843913DBAB638AE4 /* iMote-Host.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "iMote-Host.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F6012345678903 /* iMote.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = iMote.icon; sourceTree = "<group>"; };
+		A30B15F95157EBCD2481742E /* IMoteiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMoteiOSApp.swift; sourceTree = "<group>"; };
 		A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteKeyboardProtocol.swift; sourceTree = "<group>"; };
 		CBF2249F384A3961E513C070 /* BonjourServiceBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourServiceBrowser.swift; sourceTree = "<group>"; };
 		D1B5A789ADC802F2FFA34809 /* KeyboardInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInjector.swift; sourceTree = "<group>"; };
@@ -95,7 +98,7 @@
 			children = (
 				D748496989F8D3202C8011AD /* ContentView.swift */,
 				D1CA03D8B26AEEF394F1FADC /* Info.plist */,
-				A30B15F95157EBCD2481742E /* RemoteKeyboardiOSApp.swift */,
+				A30B15F95157EBCD2481742E /* IMoteiOSApp.swift */,
 				81C2EF69354165FA176CD490 /* Input */,
 				0255BFE2BF1901AEB12BD6CD /* Networking */,
 				35E411CE57D8DBBE54772C3E /* UI */,
@@ -157,8 +160,8 @@
 		6126ACFC4BB95ECAA95C9A72 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				5F376848EB6CBFB125129B9B /* iPhoneKeyboard-iOS.app */,
-				9DF57A29843913DBAB638AE4 /* iPhoneKeyboard-Mac.app */,
+				5F376848EB6CBFB125129B9B /* iMote-iOS.app */,
+				9DF57A29843913DBAB638AE4 /* iMote-Host.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -169,6 +172,7 @@
 				1C4FBA0A598EEDEA00AE40B8 /* iOSApp */,
 				CBD28E1CBF12B98C0D059FED /* macOSApp */,
 				D7973A45CDD7967AC6C70734 /* Shared */,
+				A1B2C3D4E5F6012345678903 /* iMote.icon */,
 				6126ACFC4BB95ECAA95C9A72 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -228,7 +232,7 @@
 			isa = PBXGroup;
 			children = (
 				EEE4FFDB46E24A20DC1C3B1E /* Info.plist */,
-				889865EECE778A1590EAFE31 /* RemoteKeyboardMacApp.swift */,
+				889865EECE778A1590EAFE31 /* IMoteMacApp.swift */,
 				61E8C5B71178F4A9DCDABD32 /* AppState */,
 				528D560E2185EA83EC0CD13A /* Input */,
 				B411F66D83EEAE2A6761C1BD /* Networking */,
@@ -253,38 +257,40 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		13EEB17783B041178062A540 /* iPhoneKeyboard-iOS */ = {
+		13EEB17783B041178062A540 /* iMote-iOS */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 76465E19946A78A93952FF93 /* Build configuration list for PBXNativeTarget "iPhoneKeyboard-iOS" */;
+			buildConfigurationList = 76465E19946A78A93952FF93 /* Build configuration list for PBXNativeTarget "iMote-iOS" */;
 			buildPhases = (
 				CE0352BCDA23427A8714008D /* Sources */,
+				A1B2C3D4E5F6012345678904 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = "iPhoneKeyboard-iOS";
+			name = "iMote-iOS";
 			packageProductDependencies = (
 			);
-			productName = "iPhoneKeyboard-iOS";
-			productReference = 5F376848EB6CBFB125129B9B /* iPhoneKeyboard-iOS.app */;
+			productName = "iMote-iOS";
+			productReference = 5F376848EB6CBFB125129B9B /* iMote-iOS.app */;
 			productType = "com.apple.product-type.application";
 		};
-		D5C42A739DE696EB1796D068 /* iPhoneKeyboard-Mac */ = {
+		D5C42A739DE696EB1796D068 /* iMote-Host */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D7C4DAF4CB62B21CA581148C /* Build configuration list for PBXNativeTarget "iPhoneKeyboard-Mac" */;
+			buildConfigurationList = D7C4DAF4CB62B21CA581148C /* Build configuration list for PBXNativeTarget "iMote-Host" */;
 			buildPhases = (
 				9F68342F2E39145D3C99B347 /* Sources */,
+				A1B2C3D4E5F6012345678905 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = "iPhoneKeyboard-Mac";
+			name = "iMote-Host";
 			packageProductDependencies = (
 			);
-			productName = "iPhoneKeyboard-Mac";
-			productReference = 9DF57A29843913DBAB638AE4 /* iPhoneKeyboard-Mac.app */;
+			productName = "iMote-Host";
+			productReference = 9DF57A29843913DBAB638AE4 /* iMote-Host.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -315,8 +321,8 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				D5C42A739DE696EB1796D068 /* iPhoneKeyboard-Mac */,
-				13EEB17783B041178062A540 /* iPhoneKeyboard-iOS */,
+				D5C42A739DE696EB1796D068 /* iMote-Host */,
+				13EEB17783B041178062A540 /* iMote-iOS */,
 			);
 		};
 /* End PBXProject section */
@@ -336,7 +342,7 @@
 				BAB45B3ADCC83FC094122A83 /* MacWebSocketServer.swift in Sources */,
 				46D6A68727A71EEA2AD55B25 /* MenuBarMenuView.swift in Sources */,
 				7B495C10B03F7C21BC7B604F /* PairingManager.swift in Sources */,
-				445C07A61D1EC7EB1CD08D99 /* RemoteKeyboardMacApp.swift in Sources */,
+				445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */,
 				F87C5BA31D4641564A3AA785 /* RemoteKeyboardProtocol.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -357,17 +363,36 @@
 				3413DD952F7F269E0086D1D8 /* MacStyleKeyboardView.swift in Sources */,
 				EC0E9A83442F46E768DE86AE /* LiquidGlass.swift in Sources */,
 				3B321DF188E6DA67E424EA2C /* RemoteKeyboardProtocol.swift in Sources */,
-				5BA8D4731CB7DD70F5E2BAE7 /* RemoteKeyboardiOSApp.swift in Sources */,
+				5BA8D4731CB7DD70F5E2BAE7 /* IMoteiOSApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXResourcesBuildPhase section */
+		A1B2C3D4E5F6012345678904 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C3D4E5F6012345678901 /* iMote.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D4E5F6012345678905 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C3D4E5F6012345678902 /* iMote.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin XCBuildConfiguration section */
 		3F3C9290D90654FD76C284B2 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = iMote;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DEVELOPMENT_TEAM = Q7PF4GR8Z8;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -375,9 +400,12 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.selva.iPhoneKeyboard.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.slvssb.imote.app;
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
@@ -385,18 +413,19 @@
 		5C81C6FAA28BF4547C0CDF5F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = iMote;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 7UHC5Q7YMD;
 				INFOPLIST_FILE = macOSApp/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.selva.iPhoneKeyboard.mac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.slvssb.imote.host;
 				SDKROOT = macosx;
 			};
 			name = Release;
@@ -404,18 +433,19 @@
 		84FCA1DD04E19D0065BEABA3 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = iMote;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 7UHC5Q7YMD;
 				INFOPLIST_FILE = macOSApp/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.selva.iPhoneKeyboard.mac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.slvssb.imote.host;
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -423,7 +453,7 @@
 		8975CFFDA68DDE46B3BBFA28 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = iMote;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DEVELOPMENT_TEAM = Q7PF4GR8Z8;
 				INFOPLIST_FILE = iOSApp/Info.plist;
@@ -431,9 +461,12 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.selva.iPhoneKeyboard.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.slvssb.imote.app;
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
@@ -579,7 +612,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		76465E19946A78A93952FF93 /* Build configuration list for PBXNativeTarget "iPhoneKeyboard-iOS" */ = {
+		76465E19946A78A93952FF93 /* Build configuration list for PBXNativeTarget "iMote-iOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8975CFFDA68DDE46B3BBFA28 /* Debug */,
@@ -588,7 +621,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		D7C4DAF4CB62B21CA581148C /* Build configuration list for PBXNativeTarget "iPhoneKeyboard-Mac" */ = {
+		D7C4DAF4CB62B21CA581148C /* Build configuration list for PBXNativeTarget "iMote-Host" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				84FCA1DD04E19D0065BEABA3 /* Debug */,

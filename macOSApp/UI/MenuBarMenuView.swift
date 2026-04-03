@@ -25,7 +25,7 @@ struct MenuBarMenuView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("iPhone Keyboard Host")
+            Text("iMote Host")
                 .font(.headline)
             Text(appState.serverStatus)
                 .font(.caption)

@@ -1,6 +1,6 @@
-name: iPhoneKeyboard
+name: iMote
 options:
-  bundleIdPrefix: com.selva.iPhoneKeyboard
+  bundleIdPrefix: com.slvssb.imote
   deploymentTarget:
     iOS: "26.0"
     macOS: "26.0"
@@ -13,7 +13,7 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: NO
 packages: {}
 targets:
-  iPhoneKeyboard-iOS:
+  iMote-iOS:
     type: application
     platform: iOS
     sources:
@@ -22,7 +22,7 @@ targets:
     info:
       path: iOSApp/Info.plist
       properties:
-        CFBundleDisplayName: iPhone Keyboard
+        CFBundleDisplayName: iMote
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -31,11 +31,11 @@ targets:
           - _rkbd._tcp
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.selva.iPhoneKeyboard.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.slvssb.imote.app
         TARGETED_DEVICE_FAMILY: 1
         SUPPORTS_MACCATALYST: NO
 
-  iPhoneKeyboard-Mac:
+  iMote-Host:
     type: application
     platform: macOS
     sources:
@@ -44,9 +44,9 @@ targets:
     info:
       path: macOSApp/Info.plist
       properties:
-        CFBundleDisplayName: iPhone Keyboard Host
+        CFBundleDisplayName: iMote Host
         LSUIElement: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.selva.iPhoneKeyboard.mac
+        PRODUCT_BUNDLE_IDENTIFIER: com.slvssb.imote.host
         CODE_SIGN_STYLE: Automatic

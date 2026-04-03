@@ -3,7 +3,7 @@ import AppKit
 import Foundation
 
 @main
-struct RemoteKeyboardMacApp: App {
+struct IMoteMacApp: App {
     private struct LaunchOptions {
         let cliMode: Bool
         let port: UInt16
@@ -58,7 +58,7 @@ struct RemoteKeyboardMacApp: App {
 
     var body: some Scene {
         MenuBarExtra(
-            "iPhone Keyboard Host",
+            "iMote Host",
             systemImage: "keyboard",
             isInserted: .constant(launchOptions.cliMode == false)
         ) {
@@ -71,7 +71,7 @@ struct RemoteKeyboardMacApp: App {
                 EmptyView()
             } else {
                 VStack {
-                    Text("iPhone Keyboard Host runs in the menu bar.")
+                    Text("iMote: control your Mac from your iPhone")
                         .padding()
                 }
                 .frame(width: 320, height: 100)
@@ -100,14 +100,14 @@ private final class MacHostCLIRunner {
             printUsage()
         }
 
-        print("[iPhoneKeyboard] CLI mode enabled")
-        print("[iPhoneKeyboard] Host: \(Host.current().localizedName ?? "Unknown")")
-        print("[iPhoneKeyboard] Port: \(port)")
+        print("[iMote] CLI mode enabled")
+        print("[iMote] Host: \(Host.current().localizedName ?? "Unknown")")
+        print("[iMote] Port: \(port)")
 
         let accessibilityGranted = permissionManager.request(prompt: false)
-        print("[iPhoneKeyboard] Accessibility: \(accessibilityGranted ? "granted" : "not granted")")
+        print("[iMote] Accessibility: \(accessibilityGranted ? "granted" : "not granted")")
         if accessibilityGranted == false {
-            print("[iPhoneKeyboard] Grant at System Settings > Privacy & Security > Accessibility")
+            print("[iMote] Grant at System Settings > Privacy & Security > Accessibility")
         }
 
         bindServerCallbacks()
@@ -118,14 +118,14 @@ private final class MacHostCLIRunner {
         do {
             try server.start(port: port)
         } catch {
-            print("[iPhoneKeyboard] Failed to start listener: \(error.localizedDescription)")
+            print("[iMote] Failed to start listener: \(error.localizedDescription)")
             terminate(code: 1)
         }
     }
 
     private func bindServerCallbacks() {
         server.onStateChange = { state in
-            print("[iPhoneKeyboard] \(state)")
+            print("[iMote] \(state)")
         }
 
         server.onClientsChange = { [weak self] clients in
@@ -136,14 +136,14 @@ private final class MacHostCLIRunner {
             guard names != self.lastConnectedNames else { return }
             self.lastConnectedNames = names
             if names.isEmpty {
-                print("[iPhoneKeyboard] Connected devices: none")
+                print("[iMote] Connected devices: none")
             } else {
-                print("[iPhoneKeyboard] Connected devices: \(names.joined(separator: ", "))")
+                print("[iMote] Connected devices: \(names.joined(separator: ", "))")
             }
         }
 
         server.onRuntimeError = { reason in
-            print("[iPhoneKeyboard] Runtime error: \(reason)")
+            print("[iMote] Runtime error: \(reason)")
         }
     }
 
@@ -158,7 +158,7 @@ private final class MacHostCLIRunner {
         let remaining = max(0, Int(snapshot.expiresAt.timeIntervalSinceNow.rounded(.down)))
         if force || snapshot.code != lastPairCode || remaining % 15 == 0 {
             lastPairCode = snapshot.code
-            print("[iPhoneKeyboard] Pairing code: \(snapshot.code) (expires in \(remaining)s)")
+            print("[iMote] Pairing code: \(snapshot.code) (expires in \(remaining)s)")
         }
     }
 
@@ -185,7 +185,7 @@ private final class MacHostCLIRunner {
         pairingTicker?.invalidate()
         pairingTicker = nil
         server.stop()
-        print("[iPhoneKeyboard] Shutting down")
+        print("[iMote] Shutting down")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             exit(code)
         }
@@ -194,7 +194,7 @@ private final class MacHostCLIRunner {
     private func printUsage() {
         print("""
         Usage:
-          iPhoneKeyboard-Mac.app/Contents/MacOS/iPhoneKeyboard-Mac [--cli] [--port 8989] [--help]
+          iMote-Host.app/Contents/MacOS/iMote-Host [--cli] [--port 8989] [--help]
 
         Flags:
           --cli      Run host listener in terminal/headless mode

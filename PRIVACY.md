@@ -2,7 +2,7 @@
 
 Last updated: 2026-04-03
 
-This project (`iPhoneKeyboard`) is software that lets an iPhone send input to a Mac host and optionally view a live screen preview.
+This project (`iMote`) is software that lets an iPhone send input to a Mac host and optionally view a live screen preview.
 
 ## What Data Is Processed
 

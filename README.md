@@ -1,9 +1,9 @@
-# iPhone Keyboard Over Wi-Fi (iOS + macOS Host)
+# iMote: control your Mac from your iPhone
 
 This workspace contains two SwiftUI targets:
 
-- `iPhoneKeyboard-iOS`: iPhone remote keyboard client
-- `iPhoneKeyboard-Mac`: macOS host (menu-bar UI + CLI mode) that injects input with `CGEvent`
+- `iMote-iOS`: iPhone remote keyboard client
+- `iMote-Host`: macOS host (menu-bar UI + CLI mode) that injects input with `CGEvent`
 
 It uses local-network WebSockets, Bonjour discovery, pairing code authentication, and trusted-device sessions.
 
@@ -75,14 +75,14 @@ xcodegen generate
 Build commands used for validation:
 
 ```bash
-xcodebuild -project iPhoneKeyboard.xcodeproj -scheme iPhoneKeyboard-iOS -configuration Debug -destination 'generic/platform=iOS' -derivedDataPath /tmp/iPhoneKeyboardDerived CODE_SIGNING_ALLOWED=NO build
-xcodebuild -project iPhoneKeyboard.xcodeproj -scheme iPhoneKeyboard-Mac -configuration Debug -destination 'generic/platform=macOS' -derivedDataPath /tmp/iPhoneKeyboardDerived CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project iPhoneKeyboard.xcodeproj -scheme iMote-iOS -configuration Debug -destination 'generic/platform=iOS' -derivedDataPath /tmp/iPhoneKeyboardDerived CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project iPhoneKeyboard.xcodeproj -scheme iMote-Host -configuration Debug -destination 'generic/platform=macOS' -derivedDataPath /tmp/iPhoneKeyboardDerived CODE_SIGNING_ALLOWED=NO build
 ```
 
 ## Run
 
 1. Open `iPhoneKeyboard.xcodeproj` in Xcode.
-2. Run `iPhoneKeyboard-Mac` first.
+2. Run `iMote-Host` first.
 3. In the menu-bar app:
    - confirm listener is running
    - note the 6-digit pairing code
@@ -93,7 +93,7 @@ xcodebuild -project iPhoneKeyboard.xcodeproj -scheme iPhoneKeyboard-Mac -configu
 5. For live preview, also grant:
    - `System Settings > Privacy & Security > Screen Recording`
    - enable the host app
-5. Run `iPhoneKeyboard-iOS` on a physical iPhone on the same Wi-Fi.
+5. Run `iMote-iOS` on a physical iPhone on the same Wi-Fi.
 6. In iOS app:
    - pick discovered Mac host (Bonjour)
    - enter pairing code
@@ -105,7 +105,7 @@ xcodebuild -project iPhoneKeyboard.xcodeproj -scheme iPhoneKeyboard-Mac -configu
 You can run the mac host directly from terminal:
 
 ```bash
-/Applications/iPhoneKeyboard-Mac.app/Contents/MacOS/iPhoneKeyboard-Mac --cli --port 8989
+/Applications/iMote-Host.app/Contents/MacOS/iMote-Host --cli --port 8989
 ```
 
 CLI flags:
