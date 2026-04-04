@@ -3,8 +3,16 @@ import Foundation
 
 @MainActor
 final class IOSKeyboardViewModel: ObservableObject {
+    enum ConnectionTargetMode: String, CaseIterable {
+        case localDiscovery
+        case manualAddress
+    }
+
     @Published var services: [DiscoveredService] = []
     @Published var selectedService: DiscoveredService?
+    @Published var connectionTargetMode: ConnectionTargetMode = .localDiscovery
+    @Published var manualHost = ""
+    @Published var manualPortText = "8989"
     @Published var pairingCode = ""
     @Published var activeModifiers: Set<RemoteModifier> = []
     @Published var lastError: String?
@@ -211,10 +219,31 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     func connect() {
-        guard let selectedService else {
-            lastError = "No Mac host discovered. Keep the macOS app running on the same Wi-Fi."
-            return
+        let host: String
+        let port: Int
+
+        switch connectionTargetMode {
+        case .localDiscovery:
+            guard let selectedService else {
+                lastError = "No Mac host discovered. Keep the macOS app running on the same Wi-Fi."
+                return
+            }
+            host = selectedService.host
+            port = selectedService.port
+        case .manualAddress:
+            let trimmedHost = manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedHost.isEmpty == false else {
+                lastError = "Enter a remote host or IP address."
+                return
+            }
+            guard let parsedPort = Int(manualPortText), (1...65_535).contains(parsedPort) else {
+                lastError = "Port must be between 1 and 65535."
+                return
+            }
+            host = trimmedHost
+            port = parsedPort
         }
+
         isUserInitiatedDisconnecting = false
         suppressExpectedDisconnectErrors = false
 
@@ -229,7 +258,7 @@ final class IOSKeyboardViewModel: ObservableObject {
         }
 
         lastError = nil
-        client.connect(host: selectedService.host, port: selectedService.port, pairingCode: codeToUse)
+        client.connect(host: host, port: port, pairingCode: codeToUse)
     }
 
     func disconnect() {

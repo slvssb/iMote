@@ -555,23 +555,66 @@ private struct MacCenteredLogoOverlay: View {
 
             VStack(alignment: .leading, spacing: Layout.groupSpacing) {
                 VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+                    Text("Connection Mode")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Picker("Connection Mode", selection: $viewModel.connectionTargetMode) {
+                        Text("Local").tag(IOSKeyboardViewModel.ConnectionTargetMode.localDiscovery)
+                        Text("Remote").tag(IOSKeyboardViewModel.ConnectionTargetMode.manualAddress)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                VStack(alignment: .leading, spacing: Layout.rowSpacing) {
                     Text("Mac Host")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    fieldShell {
-                        Picker("Mac Host", selection: selectedServiceBinding) {
-                            ForEach(viewModel.services) { service in
-                                Text("\(service.name) (\(service.host))")
-                                    .tag(Optional(service))
+                    if viewModel.connectionTargetMode == .localDiscovery {
+                        fieldShell {
+                            Picker("Mac Host", selection: selectedServiceBinding) {
+                                ForEach(viewModel.services) { service in
+                                    Text("\(service.name) (\(service.host))")
+                                        .tag(Optional(service))
+                                }
                             }
+                            .pickerStyle(.menu)
+                            .disabled(viewModel.services.isEmpty)
                         }
-                        .pickerStyle(.menu)
-                        .disabled(viewModel.services.isEmpty)
-                    }
-                    if viewModel.services.isEmpty {
-                        Text("No Mac discovered yet. Keep the macOS app open on the same Wi-Fi network.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if viewModel.services.isEmpty {
+                            Text("No Mac discovered yet. Keep the macOS app open on the same Wi-Fi network.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+                            Text("Remote Host / IP")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            fieldShell {
+                                TextField("203.0.113.10", text: $viewModel.manualHost)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
+                            Text("Port")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            fieldShell {
+                                TextField("8989", text: $viewModel.manualPortText)
+                                    .keyboardType(.numberPad)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .onChange(of: viewModel.manualPortText) { _, newValue in
+                                        let digitsOnly = newValue.filter(\.isNumber)
+                                        let trimmed = String(digitsOnly.prefix(5))
+                                        if viewModel.manualPortText != trimmed {
+                                            viewModel.manualPortText = trimmed
+                                        }
+                                    }
+                            }
+                            Text("Remote mode requires the Mac host to be reachable at this IP and port.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -1311,8 +1354,19 @@ private struct MacCenteredLogoOverlay: View {
         if viewModel.isConnecting {
             return false
         }
-        guard viewModel.selectedService != nil else {
-            return false
+        switch viewModel.connectionTargetMode {
+        case .localDiscovery:
+            guard viewModel.selectedService != nil else {
+                return false
+            }
+        case .manualAddress:
+            let trimmedHost = viewModel.manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedHost.isEmpty == false else {
+                return false
+            }
+            guard let parsedPort = Int(viewModel.manualPortText), (1...65_535).contains(parsedPort) else {
+                return false
+            }
         }
         if viewModel.isTrustedAutoReconnect {
             return true
@@ -1324,8 +1378,20 @@ private struct MacCenteredLogoOverlay: View {
         if viewModel.isConnecting {
             return "Connecting to your Mac..."
         }
-        if viewModel.selectedService == nil {
+        if viewModel.connectionTargetMode == .localDiscovery, viewModel.selectedService == nil {
             return "Select a Mac host to continue."
+        }
+        if viewModel.connectionTargetMode == .manualAddress {
+            let trimmedHost = viewModel.manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedHost.isEmpty {
+                return "Enter the remote host or IP address."
+            }
+            if let parsedPort = Int(viewModel.manualPortText), (1...65_535).contains(parsedPort) == false {
+                return "Enter a valid port between 1 and 65535."
+            }
+            if Int(viewModel.manualPortText) == nil {
+                return "Enter a valid port between 1 and 65535."
+            }
         }
         if viewModel.isTrustedAutoReconnect == false && viewModel.pairingCode.count != 6 {
             return "Enter the 6-digit pairing code."

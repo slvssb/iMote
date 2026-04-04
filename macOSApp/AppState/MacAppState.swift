@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import ServiceManagement
 
 @MainActor
 final class MacAppState: ObservableObject {
@@ -10,6 +11,7 @@ final class MacAppState: ObservableObject {
     @Published var accessibilityGranted = false
     @Published var trustedDevicesCount = 0
     @Published var lastError: String?
+    @Published var startOnLoginEnabled = false
 
     private let pairingManager = PairingManager()
     private let permissionManager = AccessibilityPermissionManager()
@@ -26,6 +28,7 @@ final class MacAppState: ObservableObject {
             startPairingTicker()
             refreshPairingSnapshot()
         }
+        refreshStartOnLoginStatus()
     }
 
     func startServer() {
@@ -56,6 +59,26 @@ final class MacAppState: ObservableObject {
     func refreshAccessibility(prompt: Bool) {
         _ = permissionManager.request(prompt: prompt)
         accessibilityGranted = permissionManager.isTrusted()
+    }
+
+    func setStartOnLoginEnabled(_ enabled: Bool) {
+        guard #available(macOS 13.0, *) else {
+            lastError = "Start on Login requires macOS 13 or newer."
+            startOnLoginEnabled = false
+            return
+        }
+
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            refreshStartOnLoginStatus()
+        } catch {
+            lastError = error.localizedDescription
+            refreshStartOnLoginStatus()
+        }
     }
 
     private func bindServerCallbacks() {
@@ -89,5 +112,14 @@ final class MacAppState: ObservableObject {
         let seconds = max(0, Int(snapshot.expiresAt.timeIntervalSinceNow.rounded(.down)))
         pairingSecondsRemaining = seconds
         trustedDevicesCount = pairingManager.trustedDevicesCount()
+    }
+
+    private func refreshStartOnLoginStatus() {
+        guard #available(macOS 13.0, *) else {
+            startOnLoginEnabled = false
+            return
+        }
+        let status = SMAppService.mainApp.status
+        startOnLoginEnabled = (status == .enabled || status == .requiresApproval)
     }
 }

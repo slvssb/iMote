@@ -16,6 +16,8 @@ struct MenuBarMenuView: View {
             Divider()
             trustedDevicesSection
             Divider()
+            startOnLoginSection
+            Divider()
             controls
         }
         .padding(14)
@@ -104,5 +106,13 @@ struct MenuBarMenuView: View {
                 NSApplication.shared.terminate(nil)
             }
         }
+    }
+
+    private var startOnLoginSection: some View {
+        Toggle("Start on Login", isOn: Binding(
+            get: { appState.startOnLoginEnabled },
+            set: { appState.setStartOnLoginEnabled($0) }
+        ))
+        .font(.subheadline.weight(.semibold))
     }
 }
