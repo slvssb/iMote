@@ -558,7 +558,7 @@ private struct MacCenteredLogoOverlay: View {
 
     private var connectionPanel: some View {
         VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
-            VStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .center, spacing: 12) {
                 if let appIcon = primaryAppIconImage {
                     Image(uiImage: appIcon)
                         .resizable()
@@ -576,6 +576,10 @@ private struct MacCenteredLogoOverlay: View {
                 Text("Control your Mac from your iPhone")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+
+                Text("End-to-end encrypted")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .multilineTextAlignment(.center)
@@ -611,6 +615,8 @@ private struct MacCenteredLogoOverlay: View {
                             Text("No Mac discovered yet. Keep the macOS app open on the same Wi-Fi network.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity, alignment: .center)
                         }
                     } else {
                         VStack(alignment: .leading, spacing: Layout.rowSpacing) {
@@ -676,7 +682,9 @@ private struct MacCenteredLogoOverlay: View {
                         Text("Trusted device detected. Pairing code is not required.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
             .padding(.top, 64)
