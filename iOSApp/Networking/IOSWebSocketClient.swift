@@ -22,6 +22,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onAACConfig: ((Data) -> Void)?
     var onAACFrame: ((Data) -> Void)?
     var onThermalOverrideChanged: ((Bool) -> Void)?
+    var onPermissionStatus: ((Bool, Bool) -> Void)?
 
     private var session: URLSession!
     private var task: URLSessionWebSocketTask?
@@ -125,6 +126,14 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(RemoteMessage.audioConfig(source: source, token: pairedToken))
     }
 
+    func requestPermissionStatus() {
+        sendMessage(RemoteMessage.permissionStatusRequest(token: pairedToken))
+    }
+
+    func sendPermissionAction(_ action: HostPermissionAction) {
+        sendMessage(RemoteMessage.permissionAction(action, token: pairedToken))
+    }
+
     private func sendPairing(code: String) {
         let deviceName = UIDevice.current.name
         sendMessage(.pair(code: code, deviceName: deviceName, deviceID: deviceIdentifier))
@@ -212,6 +221,8 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                 break
             case .streamStatus:
                 onThermalOverrideChanged?(decoded.thermalOverrideActive ?? false)
+            case .permissionStatus:
+                onPermissionStatus?(decoded.accessibilityGranted ?? false, decoded.screenRecordingGranted ?? false)
             default:
                 break
             }

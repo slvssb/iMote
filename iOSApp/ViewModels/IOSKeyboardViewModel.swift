@@ -8,6 +8,26 @@ final class IOSKeyboardViewModel: ObservableObject {
         case manualAddress
     }
 
+    enum HostPermissionRequirement {
+        case accessibility
+        case screenRecording
+    }
+
+    enum PermissionGatePhase {
+        case idle
+        case checking
+        case checklist
+    }
+
+    struct HostPermissionChecklistState {
+        var accessibilityGranted: Bool
+        var screenRecordingGranted: Bool
+
+        var allGranted: Bool {
+            accessibilityGranted && screenRecordingGranted
+        }
+    }
+
     @Published var services: [DiscoveredService] = []
     @Published var selectedService: DiscoveredService?
     @Published var connectionTargetMode: ConnectionTargetMode = .localDiscovery
@@ -20,6 +40,12 @@ final class IOSKeyboardViewModel: ObservableObject {
     @Published var previewQualityMode: PreviewQualityMode = .ultra
     @Published var isThermalQualityOverrideActive = false
     @Published var audioCaptureSource: AudioCaptureSource = .systemOutput
+    @Published private(set) var permissionGatePhase: PermissionGatePhase = .idle
+    @Published private(set) var hostPermissionState = HostPermissionChecklistState(
+        accessibilityGranted: false,
+        screenRecordingGranted: false
+    )
+    @Published private(set) var hasCompletedPermissionGate = false
 
     let screenPreview = ScreenPreviewState()
 
@@ -61,6 +87,14 @@ final class IOSKeyboardViewModel: ObservableObject {
         hasTrustedSession
     }
 
+    var shouldShowPermissionGate: Bool {
+        isPaired && hasCompletedPermissionGate == false && hasSeenMissingRequiredPermissions
+    }
+
+    var canContinueAfterPermissionGate: Bool {
+        permissionGatePhase == .checklist && hostPermissionState.allGranted
+    }
+
     private let browser = BonjourServiceBrowser()
     private let client = IOSWebSocketClient()
     private let h264Decoder = H264FrameDecoder()
@@ -69,6 +103,8 @@ final class IOSKeyboardViewModel: ObservableObject {
     private var previewZoomLevel: Double = 1.0
     private var isUserInitiatedDisconnecting = false
     private var suppressExpectedDisconnectErrors = false
+    private var permissionPollTask: Task<Void, Never>?
+    private var hasSeenMissingRequiredPermissions = false
 
     private let trustedSessionKey = "remoteKeyboard.trustedSession"
     private var hasTrustedSession: Bool {
@@ -108,11 +144,13 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.isThermalQualityOverrideActive = false
                     self.screenPreview.reset()
                     self.aacAudioPlayer.stop()
+                    self.resetPermissionGate()
                 case .connecting:
                     self.isUserInitiatedDisconnecting = false
                     self.suppressExpectedDisconnectErrors = false
                     self.connectionLabel = "Connecting…"
                     self.aacAudioPlayer.stop()
+                    self.resetPermissionGate()
                 case .connected:
                     self.isUserInitiatedDisconnecting = false
                     self.suppressExpectedDisconnectErrors = false
@@ -125,6 +163,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
                     self.client.sendAudioConfig(source: self.audioCaptureSource)
                     self.aacAudioPlayer.start()
+                    self.beginPermissionGate()
                 case let .failed(reason):
                     let normalizedReason = reason.localizedLowercase
                     if self.suppressExpectedDisconnectErrors,
@@ -139,6 +178,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.isThermalQualityOverrideActive = false
                     self.screenPreview.reset()
                     self.aacAudioPlayer.stop()
+                    self.resetPermissionGate()
                     if self.hasTrustedSession,
                        self.pairingCode.isEmpty,
                        reason.localizedCaseInsensitiveContains("invalid pairing code") {
@@ -205,6 +245,30 @@ final class IOSKeyboardViewModel: ObservableObject {
         client.onThermalOverrideChanged = { [weak self] isActive in
             guard let self else { return }
             self.isThermalQualityOverrideActive = isActive
+        }
+
+        client.onPermissionStatus = { [weak self] accessibilityGranted, screenRecordingGranted in
+            guard let self else { return }
+            guard self.isPaired else { return }
+            self.hostPermissionState = HostPermissionChecklistState(
+                accessibilityGranted: accessibilityGranted,
+                screenRecordingGranted: screenRecordingGranted
+            )
+
+            if self.hostPermissionState.allGranted {
+                self.stopPermissionPolling()
+                self.permissionGatePhase = .checklist
+
+                // If host was already ready at first check, skip showing the permission gate.
+                if self.hasSeenMissingRequiredPermissions == false {
+                    self.hasCompletedPermissionGate = true
+                    self.permissionGatePhase = .idle
+                }
+            } else {
+                self.hasSeenMissingRequiredPermissions = true
+                self.permissionGatePhase = .checklist
+                self.startPermissionPollingIfNeeded()
+            }
         }
 
     }
@@ -363,6 +427,73 @@ final class IOSKeyboardViewModel: ObservableObject {
         client.sendForgetCurrentDeviceTrust()
         hasTrustedSession = false
         pairingCode = ""
+    }
+
+    func refreshHostPermissionStatus() {
+        guard isPaired else { return }
+        client.requestPermissionStatus()
+    }
+
+    func requestHostPermissionFix(_ requirement: HostPermissionRequirement) {
+        guard isPaired else { return }
+        switch requirement {
+        case .accessibility:
+            client.sendPermissionAction(.requestAccessibilityPrompt)
+            client.sendPermissionAction(.openAccessibilitySettings)
+        case .screenRecording:
+            client.sendPermissionAction(.requestScreenRecordingPrompt)
+            client.sendPermissionAction(.openScreenRecordingSettings)
+        }
+        refreshHostPermissionStatus()
+    }
+
+    func completePermissionGate() {
+        guard canContinueAfterPermissionGate else { return }
+        hasCompletedPermissionGate = true
+        stopPermissionPolling()
+    }
+
+    private func beginPermissionGate() {
+        hasCompletedPermissionGate = false
+        hasSeenMissingRequiredPermissions = false
+        hostPermissionState = HostPermissionChecklistState(
+            accessibilityGranted: false,
+            screenRecordingGranted: false
+        )
+        permissionGatePhase = .checking
+        stopPermissionPolling()
+        client.requestPermissionStatus()
+    }
+
+    private func resetPermissionGate() {
+        hasCompletedPermissionGate = false
+        hasSeenMissingRequiredPermissions = false
+        permissionGatePhase = .idle
+        hostPermissionState = HostPermissionChecklistState(
+            accessibilityGranted: false,
+            screenRecordingGranted: false
+        )
+        stopPermissionPolling()
+    }
+
+    private func startPermissionPollingIfNeeded() {
+        guard permissionPollTask == nil else { return }
+        permissionPollTask = Task { @MainActor [weak self] in
+            while Task.isCancelled == false {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self else { return }
+                guard self.isPaired, self.hasCompletedPermissionGate == false else { return }
+                if self.hostPermissionState.allGranted {
+                    return
+                }
+                self.client.requestPermissionStatus()
+            }
+        }
+    }
+
+    private func stopPermissionPolling() {
+        permissionPollTask?.cancel()
+        permissionPollTask = nil
     }
 
     private func shiftedBaseKey(for character: Character) -> String? {

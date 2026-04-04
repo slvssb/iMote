@@ -16,7 +16,11 @@ final class MacAppState: ObservableObject {
     private let pairingManager = PairingManager()
     private let permissionManager = AccessibilityPermissionManager()
     private lazy var injector = KeyboardInjector(permissionManager: permissionManager)
-    private lazy var server = MacWebSocketServer(pairingManager: pairingManager, injector: injector)
+    private lazy var server = MacWebSocketServer(
+        pairingManager: pairingManager,
+        injector: injector,
+        accessibilityPermissionManager: permissionManager
+    )
 
     private var timerCancellable: AnyCancellable?
 

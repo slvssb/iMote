@@ -424,7 +424,11 @@ private struct MacCenteredLogoOverlay: View {
                     .ignoresSafeArea()
                 } else {
                     VStack(spacing: Layout.sectionSpacing) {
-                        connectionPanel
+                        if viewModel.shouldShowPermissionGate {
+                            permissionGatePanel
+                        } else {
+                            connectionPanel
+                        }
                     }
                     .frame(maxWidth: Layout.contentMaxWidth)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -450,7 +454,9 @@ private struct MacCenteredLogoOverlay: View {
                 viewModel.setAudioCaptureSource(storedAudioSource)
             }
             if viewModel.isPaired {
-                beginConnectSequence()
+                if viewModel.hasCompletedPermissionGate {
+                    beginConnectSequence()
+                }
             }
         }
         .onDisappear {
@@ -487,7 +493,11 @@ private struct MacCenteredLogoOverlay: View {
             updateEyeCursorState()
             if isPaired {
                 cancelDisconnectSequence()
-                beginConnectSequence()
+                if viewModel.hasCompletedPermissionGate {
+                    beginConnectSequence()
+                } else {
+                    resetTransitionState()
+                }
             } else {
                 stopPreviewResyncMonitor()
                 if isControlledDisconnectFlow {
@@ -499,6 +509,10 @@ private struct MacCenteredLogoOverlay: View {
                     resetTransitionState()
                 }
             }
+        }
+        .onChange(of: viewModel.hasCompletedPermissionGate) { _, completed in
+            guard completed, viewModel.isPaired else { return }
+            beginConnectSequence()
         }
         .sheet(isPresented: $isConfigSheetPresented) {
             NavigationStack {
@@ -676,6 +690,88 @@ private struct MacCenteredLogoOverlay: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var permissionGatePanel: some View {
+        VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+            VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+                Text("Host Permissions")
+                    .font(.title3.weight(.semibold))
+                Text("Checking whether your Mac host has the required permissions before remote control starts.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.permissionGatePhase == .checking {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Checking permissions...")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, Layout.fieldHorizontalPadding)
+                .padding(.vertical, Layout.fieldVerticalPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+            } else {
+                permissionRow(
+                    title: "Accessibility",
+                    granted: viewModel.hostPermissionState.accessibilityGranted
+                ) {
+                    viewModel.requestHostPermissionFix(.accessibility)
+                }
+
+                permissionRow(
+                    title: "Screen Recording",
+                    granted: viewModel.hostPermissionState.screenRecordingGranted
+                ) {
+                    viewModel.requestHostPermissionFix(.screenRecording)
+                }
+            }
+
+            if viewModel.hostPermissionState.allGranted == false {
+                Button("I've given access. Refresh status") {
+                    viewModel.refreshHostPermissionStatus()
+                }
+                .buttonStyle(LiquidGlassButtonStyle(tint: .gray))
+                .frame(maxWidth: .infinity)
+            }
+
+            if viewModel.canContinueAfterPermissionGate {
+                Button("Continue") {
+                    viewModel.completePermissionGate()
+                }
+                .buttonStyle(LiquidGlassButtonStyle(tint: .blue))
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func permissionRow(
+        title: String,
+        granted: Bool,
+        onFixTapped: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+            Spacer(minLength: 0)
+            if granted {
+                Label("Granted", systemImage: "checkmark.circle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.green)
+            } else {
+                Button("Grant Access") {
+                    onFixTapped()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(.horizontal, Layout.fieldHorizontalPadding)
+        .padding(.vertical, Layout.fieldVerticalPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
     }
 
     private var primaryAppIconImage: UIImage? {

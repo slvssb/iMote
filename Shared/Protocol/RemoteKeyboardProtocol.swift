@@ -14,6 +14,9 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case trustControl
     case streamStatus
     case audioConfig
+    case permissionStatusRequest
+    case permissionStatus
+    case permissionAction
     case screenFrame
     case ping
     case pong
@@ -54,6 +57,13 @@ public enum TrustControlAction: String, Codable, Sendable {
     case forgetCurrentDevice
 }
 
+public enum HostPermissionAction: String, Codable, Sendable {
+    case requestAccessibilityPrompt
+    case requestScreenRecordingPrompt
+    case openAccessibilitySettings
+    case openScreenRecordingSettings
+}
+
 public struct RemoteMessage: Codable, Sendable {
     public var type: RemoteMessageType
     public var value: String?
@@ -79,6 +89,9 @@ public struct RemoteMessage: Codable, Sendable {
     public var thermalOverrideActive: Bool?
     public var frameBase64: String?
     public var audioSource: AudioCaptureSource?
+    public var permissionAction: HostPermissionAction?
+    public var accessibilityGranted: Bool?
+    public var screenRecordingGranted: Bool?
 
     public init(
         type: RemoteMessageType,
@@ -104,7 +117,10 @@ public struct RemoteMessage: Codable, Sendable {
         trustAction: TrustControlAction? = nil,
         thermalOverrideActive: Bool? = nil,
         frameBase64: String? = nil,
-        audioSource: AudioCaptureSource? = nil
+        audioSource: AudioCaptureSource? = nil,
+        permissionAction: HostPermissionAction? = nil,
+        accessibilityGranted: Bool? = nil,
+        screenRecordingGranted: Bool? = nil
     ) {
         self.type = type
         self.value = value
@@ -130,6 +146,9 @@ public struct RemoteMessage: Codable, Sendable {
         self.thermalOverrideActive = thermalOverrideActive
         self.frameBase64 = frameBase64
         self.audioSource = audioSource
+        self.permissionAction = permissionAction
+        self.accessibilityGranted = accessibilityGranted
+        self.screenRecordingGranted = screenRecordingGranted
     }
 
     public static func pair(code: String, deviceName: String, deviceID: String?) -> RemoteMessage {
@@ -191,6 +210,22 @@ public struct RemoteMessage: Codable, Sendable {
 
     public static func screenFrame(frameBase64: String) -> RemoteMessage {
         RemoteMessage(type: .screenFrame, frameBase64: frameBase64)
+    }
+
+    public static func permissionStatusRequest(token: String?) -> RemoteMessage {
+        RemoteMessage(type: .permissionStatusRequest, token: token)
+    }
+
+    public static func permissionStatus(accessibilityGranted: Bool, screenRecordingGranted: Bool) -> RemoteMessage {
+        RemoteMessage(
+            type: .permissionStatus,
+            accessibilityGranted: accessibilityGranted,
+            screenRecordingGranted: screenRecordingGranted
+        )
+    }
+
+    public static func permissionAction(_ action: HostPermissionAction, token: String?) -> RemoteMessage {
+        RemoteMessage(type: .permissionAction, token: token, permissionAction: action)
     }
 
     public static func error(_ reason: String) -> RemoteMessage {

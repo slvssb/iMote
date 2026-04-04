@@ -25,6 +25,7 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private let pairingManager: PairingManager
     private let injector: KeyboardInjector
+    private let accessibilityPermissionManager: AccessibilityPermissionManager
     private let screenCaptureProvider = MacScreenCaptureProvider()
     private let h264Encoder = H264FrameEncoder()
     private let aacEncoder = AACAudioEncoder()
@@ -50,9 +51,14 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var audioDebugSentConfigCount = 0
     private var audioDebugSentFrameCount = 0
 
-    init(pairingManager: PairingManager, injector: KeyboardInjector) {
+    init(
+        pairingManager: PairingManager,
+        injector: KeyboardInjector,
+        accessibilityPermissionManager: AccessibilityPermissionManager
+    ) {
         self.pairingManager = pairingManager
         self.injector = injector
+        self.accessibilityPermissionManager = accessibilityPermissionManager
 
         h264Encoder.onPacket = { [weak self] packet in
             guard let self else { return }
@@ -268,6 +274,10 @@ final class MacWebSocketServer: @unchecked Sendable {
             handleStreamResync(message, from: id)
         case .audioConfig:
             handleAudioConfig(message, from: id)
+        case .permissionStatusRequest:
+            handlePermissionStatusRequest(message, from: id)
+        case .permissionAction:
+            handlePermissionAction(message, from: id)
         case .trustControl:
             handleTrustControl(message, from: id)
         case .ping:
@@ -290,6 +300,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             h264Encoder.requestStreamResync()
             send(.pairAck(success: true, token: token, reason: nil), to: id)
             sendStreamStatus(to: id)
+            sendPermissionStatus(to: id)
             publishClients()
         } else {
             send(.pairAck(success: false, token: nil, reason: result.reason), to: id)
@@ -302,6 +313,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             send(.error("Unauthorized session token"), to: id)
             return
         }
+        guard assertHostPermissionsForControl(to: id) else { return }
         guard let value = message.value else { return }
         do {
             try injector.injectText(value)
@@ -316,6 +328,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             send(.error("Unauthorized session token"), to: id)
             return
         }
+        guard assertHostPermissionsForControl(to: id) else { return }
         guard let key = message.key else { return }
         let action = message.action ?? .tap
         let modifiers = message.modifiers ?? []
@@ -332,6 +345,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             send(.error("Unauthorized session token"), to: id)
             return
         }
+        guard assertHostPermissionsForControl(to: id) else { return }
 
         let deltaX = message.deltaX ?? 0
         let deltaY = message.deltaY ?? 0
@@ -350,6 +364,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             send(.error("Unauthorized session token"), to: id)
             return
         }
+        guard assertHostPermissionsForControl(to: id) else { return }
 
         let action = message.action ?? .tap
         let button = message.button ?? .left
@@ -367,6 +382,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             send(.error("Unauthorized session token"), to: id)
             return
         }
+        guard assertHostPermissionsForControl(to: id) else { return }
 
         let scrollX = message.scrollX ?? 0
         let scrollY = message.scrollY ?? 0
@@ -418,6 +434,37 @@ final class MacWebSocketServer: @unchecked Sendable {
             await screenCaptureProvider.setAudioCaptureSource(source)
         }
         aacEncoder.requestStreamResync()
+    }
+
+    private func handlePermissionStatusRequest(_ message: RemoteMessage, from id: UUID) {
+        let isAuthorized = authorize(id: id, token: message.token)
+        guard isAuthorized else {
+            send(.error("Unauthorized session token"), to: id)
+            return
+        }
+        sendPermissionStatus(to: id)
+    }
+
+    private func handlePermissionAction(_ message: RemoteMessage, from id: UUID) {
+        let isAuthorized = authorize(id: id, token: message.token)
+        guard isAuthorized else {
+            send(.error("Unauthorized session token"), to: id)
+            return
+        }
+        guard let action = message.permissionAction else { return }
+
+        switch action {
+        case .requestAccessibilityPrompt:
+            _ = accessibilityPermissionManager.request(prompt: true)
+        case .requestScreenRecordingPrompt:
+            _ = CGRequestScreenCaptureAccess()
+        case .openAccessibilitySettings:
+            openSystemSettings(urlString: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        case .openScreenRecordingSettings:
+            openSystemSettings(urlString: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        }
+
+        sendPermissionStatus(to: id)
     }
 
     private func handleTrustControl(_ message: RemoteMessage, from id: UUID) {
@@ -651,6 +698,40 @@ final class MacWebSocketServer: @unchecked Sendable {
             }
             guard hasPairedClients else { return }
             self.aacEncoder.encode(sampleBuffer: sampleBuffer.value)
+        }
+    }
+
+    private func currentHostPermissionStatus() -> (accessibilityGranted: Bool, screenRecordingGranted: Bool) {
+        let accessibilityGranted = accessibilityPermissionManager.isTrusted()
+        let screenRecordingGranted = CGPreflightScreenCaptureAccess()
+        return (accessibilityGranted, screenRecordingGranted)
+    }
+
+    private func assertHostPermissionsForControl(to id: UUID) -> Bool {
+        let status = currentHostPermissionStatus()
+        guard status.accessibilityGranted, status.screenRecordingGranted else {
+            send(.error("Host permissions are required before remote control can start."), to: id)
+            sendPermissionStatus(to: id)
+            return false
+        }
+        return true
+    }
+
+    private func sendPermissionStatus(to id: UUID) {
+        let status = currentHostPermissionStatus()
+        send(
+            .permissionStatus(
+                accessibilityGranted: status.accessibilityGranted,
+                screenRecordingGranted: status.screenRecordingGranted
+            ),
+            to: id
+        )
+    }
+
+    private func openSystemSettings(urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        Task { @MainActor in
+            NSWorkspace.shared.open(url)
         }
     }
 
