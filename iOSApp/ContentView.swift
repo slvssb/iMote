@@ -538,13 +538,12 @@ private struct MacCenteredLogoOverlay: View {
                         }
                         .buttonStyle(LiquidGlassButtonStyle(tint: .red))
                         .frame(maxWidth: .infinity)
+                        .padding(.top, 24)
 
                         Button("Forget and Disconnect", role: .destructive) {
                             beginControlledDisconnectSequence(forgetDevice: true)
                             isConfigSheetPresented = false
                         }
-                        .buttonStyle(LiquidGlassButtonStyle(tint: .red))
-                        .frame(maxWidth: .infinity)
                     }
                     .padding(Layout.contentPadding)
                 }
@@ -1143,8 +1142,7 @@ private struct MacCenteredLogoOverlay: View {
         VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
-                    Text("Zoom level")
-                        .font(.footnote.weight(.semibold))
+                    settingsTitle("Zoom level", systemImage: "plus.magnifyingglass")
                     Text("\(previewZoomLevel, specifier: "%.1f")x")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -1160,7 +1158,7 @@ private struct MacCenteredLogoOverlay: View {
                     in: 1.0...3.0,
                     step: 0.5
                 ) {
-                    Text("Zoom level")
+                    settingsTitle("Zoom level", systemImage: "plus.magnifyingglass")
                 } minimumValueLabel: {
                     Text("1.0x")
                         .font(.caption2)
@@ -1179,8 +1177,7 @@ private struct MacCenteredLogoOverlay: View {
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
 
             HStack(spacing: 12) {
-                Text("Immersive landscape preview")
-                    .font(.footnote.weight(.semibold))
+                settingsTitle("Immersive landscape preview", systemImage: "rectangle.inset.filled.and.person.filled")
                 Spacer(minLength: 0)
                 Toggle("", isOn: $isImmersiveLandscapeModeEnabled)
                     .labelsHidden()
@@ -1191,8 +1188,7 @@ private struct MacCenteredLogoOverlay: View {
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
 
             HStack(spacing: 12) {
-                Text("Virtual overscan")
-                    .font(.footnote.weight(.semibold))
+                settingsTitle("Virtual overscan", systemImage: "viewfinder")
                 Spacer(minLength: 0)
                 Toggle("", isOn: $isVirtualOverscanEnabled)
                     .labelsHidden()
@@ -1203,8 +1199,7 @@ private struct MacCenteredLogoOverlay: View {
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
 
             HStack(spacing: 12) {
-                Text("Experimental")
-                    .font(.footnote.weight(.semibold))
+                settingsTitle("Experimental", systemImage: "flask")
                 Spacer(minLength: 0)
                 Toggle("", isOn: $isEyeCursorExperimentalEnabled)
                     .labelsHidden()
@@ -1216,8 +1211,7 @@ private struct MacCenteredLogoOverlay: View {
 
             if isEyeCursorExperimentalEnabled {
                 HStack(spacing: 12) {
-                    Text("Eye cursor control")
-                        .font(.footnote.weight(.semibold))
+                    settingsTitle("Eye cursor control", systemImage: "eye")
                     Spacer(minLength: 0)
                     Toggle("", isOn: $isEyeCursorEnabled)
                         .labelsHidden()
@@ -1234,8 +1228,7 @@ private struct MacCenteredLogoOverlay: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Preview quality")
-                    .font(.footnote.weight(.semibold))
+                settingsTitle("Preview quality", systemImage: "dial.medium")
 
                 Picker("Preview Quality", selection: Binding(
                     get: { viewModel.previewQualityMode },
@@ -1257,8 +1250,7 @@ private struct MacCenteredLogoOverlay: View {
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Audio source")
-                    .font(.footnote.weight(.semibold))
+                settingsTitle("Audio source", systemImage: "speaker.wave.2")
 
                 Picker("Audio Source", selection: Binding(
                     get: { viewModel.audioCaptureSource },
@@ -1271,7 +1263,7 @@ private struct MacCenteredLogoOverlay: View {
                     Text("Off").tag(AudioCaptureSource.off)
                     Text("System").tag(AudioCaptureSource.systemOutput)
                     Text("Mic").tag(AudioCaptureSource.microphone)
-                    Text("System + Mic").tag(AudioCaptureSource.systemAndMicrophone)
+                    Text("Both").tag(AudioCaptureSource.systemAndMicrophone)
                 }
                 .pickerStyle(.segmented)
             }
@@ -1288,6 +1280,16 @@ private struct MacCenteredLogoOverlay: View {
                 dismissTypingCapture()
             }
         )
+    }
+
+    private func settingsTitle(_ text: String, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tint)
+            Text(text)
+                .font(.footnote.weight(.semibold))
+        }
     }
 
     private var inputPanel: some View {
