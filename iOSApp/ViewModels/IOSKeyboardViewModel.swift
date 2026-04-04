@@ -51,7 +51,7 @@ final class IOSKeyboardViewModel: ObservableObject {
 
     var isConnected: Bool {
         switch client.state {
-        case .connected, .paired:
+        case .connected, .securing, .paired:
             return true
         default:
             return false
@@ -155,10 +155,14 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.isUserInitiatedDisconnecting = false
                     self.suppressExpectedDisconnectErrors = false
                     self.connectionLabel = "Connected (awaiting pairing)"
+                case .securing:
+                    self.isUserInitiatedDisconnecting = false
+                    self.suppressExpectedDisconnectErrors = false
+                    self.connectionLabel = "Connected (establishing E2E…)"
                 case .paired:
                     self.isUserInitiatedDisconnecting = false
                     self.suppressExpectedDisconnectErrors = false
-                    self.connectionLabel = "Paired and ready"
+                    self.connectionLabel = "Paired and ready (E2E)"
                     self.hasTrustedSession = true
                     self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
                     self.client.sendAudioConfig(source: self.audioCaptureSource)

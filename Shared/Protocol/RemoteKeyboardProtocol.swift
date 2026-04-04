@@ -3,6 +3,9 @@ import Foundation
 public enum RemoteMessageType: String, Codable, Sendable {
     case pair
     case pairAck
+    case e2eHello
+    case e2eHelloAck
+    case secureControl
     case text
     case key
     case mouseMove
@@ -92,6 +95,10 @@ public struct RemoteMessage: Codable, Sendable {
     public var permissionAction: HostPermissionAction?
     public var accessibilityGranted: Bool?
     public var screenRecordingGranted: Bool?
+    public var securePayload: String?
+    public var signingPublicKey: String?
+    public var ephemeralPublicKey: String?
+    public var signature: String?
 
     public init(
         type: RemoteMessageType,
@@ -120,7 +127,11 @@ public struct RemoteMessage: Codable, Sendable {
         audioSource: AudioCaptureSource? = nil,
         permissionAction: HostPermissionAction? = nil,
         accessibilityGranted: Bool? = nil,
-        screenRecordingGranted: Bool? = nil
+        screenRecordingGranted: Bool? = nil,
+        securePayload: String? = nil,
+        signingPublicKey: String? = nil,
+        ephemeralPublicKey: String? = nil,
+        signature: String? = nil
     ) {
         self.type = type
         self.value = value
@@ -149,6 +160,10 @@ public struct RemoteMessage: Codable, Sendable {
         self.permissionAction = permissionAction
         self.accessibilityGranted = accessibilityGranted
         self.screenRecordingGranted = screenRecordingGranted
+        self.securePayload = securePayload
+        self.signingPublicKey = signingPublicKey
+        self.ephemeralPublicKey = ephemeralPublicKey
+        self.signature = signature
     }
 
     public static func pair(code: String, deviceName: String, deviceID: String?) -> RemoteMessage {
@@ -157,6 +172,44 @@ public struct RemoteMessage: Codable, Sendable {
 
     public static func pairAck(success: Bool, token: String?, reason: String?) -> RemoteMessage {
         RemoteMessage(type: .pairAck, token: token, success: success, reason: reason)
+    }
+
+    public static func secureControl(payloadBase64: String, token: String?) -> RemoteMessage {
+        RemoteMessage(type: .secureControl, token: token, securePayload: payloadBase64)
+    }
+
+    public static func e2eHello(
+        deviceID: String,
+        signingPublicKey: String,
+        ephemeralPublicKey: String,
+        signature: String,
+        token: String?
+    ) -> RemoteMessage {
+        RemoteMessage(
+            type: .e2eHello,
+            token: token,
+            deviceID: deviceID,
+            signingPublicKey: signingPublicKey,
+            ephemeralPublicKey: ephemeralPublicKey,
+            signature: signature
+        )
+    }
+
+    public static func e2eHelloAck(
+        deviceID: String,
+        signingPublicKey: String,
+        ephemeralPublicKey: String,
+        signature: String,
+        token: String?
+    ) -> RemoteMessage {
+        RemoteMessage(
+            type: .e2eHelloAck,
+            token: token,
+            deviceID: deviceID,
+            signingPublicKey: signingPublicKey,
+            ephemeralPublicKey: ephemeralPublicKey,
+            signature: signature
+        )
     }
 
     public static func text(_ text: String, token: String?) -> RemoteMessage {

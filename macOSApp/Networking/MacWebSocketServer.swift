@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import CoreGraphics
 import Foundation
 import Network
@@ -21,6 +22,13 @@ final class MacWebSocketServer: @unchecked Sendable {
         let connection: NWConnection
         var token: String?
         var deviceName: String?
+        var secureSession: SecureSession?
+    }
+
+    private struct SecureSession {
+        let clientDeviceID: String
+        let controlKey: SymmetricKey
+        let mediaKey: SymmetricKey
     }
 
     private let pairingManager: PairingManager
@@ -50,6 +58,16 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var adaptiveWindowEncodedCount = 0
     private var audioDebugSentConfigCount = 0
     private var audioDebugSentFrameCount = 0
+    private var localSigningPrivateKey = MacWebSocketServer.loadOrCreateSigningPrivateKey()
+    private let hostDeviceID = MacWebSocketServer.loadOrCreateHostDeviceID()
+
+    private enum BinaryPacketMarker {
+        static let encryptedMedia: UInt8 = 0x7E
+        static let h264Config: UInt8 = 0x10
+        static let h264Frame: UInt8 = 0x11
+        static let aacConfig: UInt8 = 0x20
+        static let aacFrame: UInt8 = 0x21
+    }
 
     init(
         pairingManager: PairingManager,
@@ -64,7 +82,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             guard let self else { return }
             self.queue.async {
                 let pairedClientIDs = self.clients.compactMap { id, context in
-                    context.token == nil ? nil : id
+                    (context.token == nil || context.secureSession == nil) ? nil : id
                 }
                 for id in pairedClientIDs {
                     self.sendBinaryFrame(packet, to: id)
@@ -87,7 +105,7 @@ final class MacWebSocketServer: @unchecked Sendable {
                     }
                 }
                 let pairedClientIDs = self.clients.compactMap { id, context in
-                    context.token == nil ? nil : id
+                    (context.token == nil || context.secureSession == nil) ? nil : id
                 }
                 for id in pairedClientIDs {
                     self.sendBinaryFrame(packet, to: id)
@@ -193,7 +211,7 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private func accept(_ connection: NWConnection) {
         let id = UUID()
-        let context = ClientContext(id: id, connection: connection, token: nil, deviceName: nil)
+        let context = ClientContext(id: id, connection: connection, token: nil, deviceName: nil, secureSession: nil)
         clients[id] = context
         publishClients()
 
@@ -255,35 +273,73 @@ final class MacWebSocketServer: @unchecked Sendable {
             return
         }
 
+        if message.type == .secureControl {
+            handleSecureControl(message, from: id)
+            return
+        }
+
+        handleDecodedMessage(message, from: id, isFromSecureChannel: false)
+    }
+
+    private func handleDecodedMessage(_ message: RemoteMessage, from id: UUID, isFromSecureChannel: Bool) {
         switch message.type {
         case .pair:
             handlePair(message, from: id)
+        case .e2eHello:
+            handleE2EHello(message, from: id)
         case .text:
-            handleText(message, from: id)
+            if isFromSecureChannel { handleText(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .key:
-            handleKey(message, from: id)
+            if isFromSecureChannel { handleKey(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .mouseMove:
-            handleMouseMove(message, from: id)
+            if isFromSecureChannel { handleMouseMove(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .mouseClick:
-            handleMouseClick(message, from: id)
+            if isFromSecureChannel { handleMouseClick(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .mouseScroll:
-            handleMouseScroll(message, from: id)
+            if isFromSecureChannel { handleMouseScroll(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .streamConfig:
-            handleStreamConfig(message, from: id)
+            if isFromSecureChannel { handleStreamConfig(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .streamResync:
-            handleStreamResync(message, from: id)
+            if isFromSecureChannel { handleStreamResync(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .audioConfig:
-            handleAudioConfig(message, from: id)
+            if isFromSecureChannel { handleAudioConfig(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .permissionStatusRequest:
-            handlePermissionStatusRequest(message, from: id)
+            if isFromSecureChannel { handlePermissionStatusRequest(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .permissionAction:
-            handlePermissionAction(message, from: id)
+            if isFromSecureChannel { handlePermissionAction(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .trustControl:
-            handleTrustControl(message, from: id)
+            if isFromSecureChannel { handleTrustControl(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .ping:
             send(RemoteMessage(type: .pong), to: id)
         default:
             break
+        }
+    }
+
+    private func handleSecureControl(_ message: RemoteMessage, from id: UUID) {
+        guard authorize(id: id, token: message.token),
+              let context = clients[id],
+              let secureSession = context.secureSession else {
+            send(.error("Unauthorized secure control session"), to: id)
+            return
+        }
+        guard let payloadBase64 = message.securePayload,
+              let combined = Data(base64Encoded: payloadBase64) else {
+            send(.error("Malformed secure control payload"), to: id)
+            return
+        }
+
+        do {
+            let sealedBox = try ChaChaPoly.SealedBox(combined: combined)
+            let plaintext = try ChaChaPoly.open(sealedBox, using: secureSession.controlKey)
+            let inner = try RemoteProtocolCodec.decode(plaintext)
+            guard inner.type != .secureControl else {
+                send(.error("Nested secure control payload is not allowed"), to: id)
+                return
+            }
+            handleDecodedMessage(inner, from: id, isFromSecureChannel: true)
+        } catch {
+            send(.error("Unable to decrypt secure control payload"), to: id)
         }
     }
 
@@ -294,16 +350,83 @@ final class MacWebSocketServer: @unchecked Sendable {
         if result.success, let token = result.token {
             context.token = token
             context.deviceName = message.deviceName
+            context.secureSession = nil
             clients[id] = context
             // Ensure newly paired/reconnected clients always receive a fresh
             // config + keyframe sequence so decoder state can recover.
             h264Encoder.requestStreamResync()
-            send(.pairAck(success: true, token: token, reason: nil), to: id)
+            send(.pairAck(success: true, token: token, reason: nil), to: id, deviceIDOverride: hostDeviceID)
             sendStreamStatus(to: id)
             sendPermissionStatus(to: id)
             publishClients()
         } else {
             send(.pairAck(success: false, token: nil, reason: result.reason), to: id)
+        }
+    }
+
+    private func handleE2EHello(_ message: RemoteMessage, from id: UUID) {
+        guard authorize(id: id, token: message.token), let token = message.token else {
+            send(.error("Unauthorized secure handshake"), to: id)
+            return
+        }
+        guard let clientDeviceID = message.deviceID,
+              let clientSigningKeyBase64 = message.signingPublicKey,
+              let clientEphemeralBase64 = message.ephemeralPublicKey,
+              let signatureBase64 = message.signature,
+              let clientSigningKeyData = Data(base64Encoded: clientSigningKeyBase64),
+              let clientEphemeralData = Data(base64Encoded: clientEphemeralBase64),
+              let signatureData = Data(base64Encoded: signatureBase64) else {
+            send(.error("Malformed secure handshake payload"), to: id)
+            return
+        }
+
+        guard pairingManager.verifyOrPinSigningKey(deviceID: clientDeviceID, signingPublicKeyBase64: clientSigningKeyBase64) else {
+            send(.error("Client identity key mismatch"), to: id)
+            return
+        }
+
+        do {
+            let clientSigningKey = try Curve25519.Signing.PublicKey(rawRepresentation: clientSigningKeyData)
+            let signaturePayload = Self.signaturePayload(token: token, deviceID: clientDeviceID, ephemeralPublicKey: clientEphemeralData)
+            guard clientSigningKey.isValidSignature(signatureData, for: signaturePayload) else {
+                send(.error("Invalid secure handshake signature"), to: id)
+                return
+            }
+
+            let hostEphemeralPrivateKey = Curve25519.KeyAgreement.PrivateKey()
+            let hostEphemeralPublicData = hostEphemeralPrivateKey.publicKey.rawRepresentation
+            let clientEphemeralPublicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: clientEphemeralData)
+            let sharedSecret = try hostEphemeralPrivateKey.sharedSecretFromKeyAgreement(with: clientEphemeralPublicKey)
+            let salt = Data(token.utf8)
+            let controlKey = sharedSecret.hkdfDerivedSymmetricKey(
+                using: SHA256.self,
+                salt: salt,
+                sharedInfo: Data("iMote.e2e.control.v1".utf8),
+                outputByteCount: 32
+            )
+            let mediaKey = sharedSecret.hkdfDerivedSymmetricKey(
+                using: SHA256.self,
+                salt: salt,
+                sharedInfo: Data("iMote.e2e.media.v1".utf8),
+                outputByteCount: 32
+            )
+
+            guard var context = clients[id] else { return }
+            context.secureSession = SecureSession(clientDeviceID: clientDeviceID, controlKey: controlKey, mediaKey: mediaKey)
+            clients[id] = context
+
+            let hostSignaturePayload = Self.signaturePayload(token: token, deviceID: hostDeviceID, ephemeralPublicKey: hostEphemeralPublicData)
+            let hostSignature = try localSigningPrivateKey.signature(for: hostSignaturePayload)
+            send(.e2eHelloAck(
+                deviceID: hostDeviceID,
+                signingPublicKey: localSigningPrivateKey.publicKey.rawRepresentation.base64EncodedString(),
+                ephemeralPublicKey: hostEphemeralPublicData.base64EncodedString(),
+                signature: hostSignature.base64EncodedString(),
+                token: token
+            ), to: id)
+            publishClients()
+        } catch {
+            send(.error("Failed to establish secure channel"), to: id)
         }
     }
 
@@ -501,7 +624,11 @@ final class MacWebSocketServer: @unchecked Sendable {
         return pairingManager.validate(token: token)
     }
 
-    private func send(_ message: RemoteMessage, to id: UUID) {
+    private func send(_ message: RemoteMessage, to id: UUID, deviceIDOverride: String? = nil) {
+        var message = message
+        if let deviceIDOverride {
+            message.deviceID = deviceIDOverride
+        }
         guard let payload = try? RemoteProtocolCodec.encode(message) else {
             return
         }
@@ -518,12 +645,68 @@ final class MacWebSocketServer: @unchecked Sendable {
             identifier: "remoteKeyboard",
             metadata: [metadata]
         )
+        let outboundPayload: Data
+        if let secureSession = context.secureSession, Self.isMediaPacket(payload) {
+            do {
+                let sealedBox = try ChaChaPoly.seal(payload, using: secureSession.mediaKey)
+                var packet = Data([BinaryPacketMarker.encryptedMedia])
+                packet.append(sealedBox.combined)
+                outboundPayload = packet
+            } catch {
+                reportError("Failed to encrypt media packet")
+                return
+            }
+        } else {
+            outboundPayload = payload
+        }
+
         context.connection.send(
-            content: payload,
+            content: outboundPayload,
             contentContext: contentContext,
             isComplete: true,
             completion: .idempotent
         )
+    }
+
+    private static func isMediaPacket(_ payload: Data) -> Bool {
+        guard let marker = payload.first else { return false }
+        return marker == BinaryPacketMarker.h264Config ||
+            marker == BinaryPacketMarker.h264Frame ||
+            marker == BinaryPacketMarker.aacConfig ||
+            marker == BinaryPacketMarker.aacFrame
+    }
+
+    private static func signaturePayload(token: String, deviceID: String, ephemeralPublicKey: Data) -> Data {
+        var payload = Data()
+        payload.append(contentsOf: Data("iMote.e2e.handshake.v1|".utf8))
+        payload.append(contentsOf: Data(token.utf8))
+        payload.append(contentsOf: Data("|".utf8))
+        payload.append(contentsOf: Data(deviceID.utf8))
+        payload.append(contentsOf: Data("|".utf8))
+        payload.append(ephemeralPublicKey)
+        return payload
+    }
+
+    private static func loadOrCreateHostDeviceID() -> String {
+        let key = "remoteKeyboard.mac.hostDeviceID"
+        if let existing = UserDefaults.standard.string(forKey: key), existing.isEmpty == false {
+            return existing
+        }
+        let created = UUID().uuidString
+        UserDefaults.standard.set(created, forKey: key)
+        return created
+    }
+
+    private static func loadOrCreateSigningPrivateKey() -> Curve25519.Signing.PrivateKey {
+        let key = "remoteKeyboard.mac.signingPrivateKey"
+        if let stored = UserDefaults.standard.string(forKey: key),
+           let data = Data(base64Encoded: stored),
+           let existing = try? Curve25519.Signing.PrivateKey(rawRepresentation: data) {
+            return existing
+        }
+        let created = Curve25519.Signing.PrivateKey()
+        UserDefaults.standard.set(created.rawRepresentation.base64EncodedString(), forKey: key)
+        return created
     }
 
     private func publishClients() {

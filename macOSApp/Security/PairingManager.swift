@@ -13,7 +13,9 @@ final class PairingManager {
     private let codeValiditySeconds: TimeInterval
     private var activeTokens: [String: Date] = [:]
     private var trustedDeviceIDs: Set<String> = []
+    private var trustedDeviceSigningKeys: [String: String] = [:]
     private let trustedDevicesKey = "remoteKeyboard.trustedDeviceIDs"
+    private let trustedSigningKeysKey = "remoteKeyboard.trustedDeviceSigningKeys"
     private let lock = NSLock()
 
     init(codeValiditySeconds: TimeInterval = 60) {
@@ -100,7 +102,26 @@ final class PairingManager {
     func removeTrustedDevice(deviceID: String) {
         withLock {
             trustedDeviceIDs.remove(deviceID)
+            trustedDeviceSigningKeys.removeValue(forKey: deviceID)
             persistTrustedDevices()
+            persistTrustedSigningKeys()
+        }
+    }
+
+    func verifyOrPinSigningKey(deviceID: String, signingPublicKeyBase64: String) -> Bool {
+        withLock {
+            if let existing = trustedDeviceSigningKeys[deviceID] {
+                return existing == signingPublicKeyBase64
+            }
+            trustedDeviceSigningKeys[deviceID] = signingPublicKeyBase64
+            persistTrustedSigningKeys()
+            return true
+        }
+    }
+
+    func pinnedSigningKey(deviceID: String) -> String? {
+        withLock {
+            trustedDeviceSigningKeys[deviceID]
         }
     }
 
@@ -114,10 +135,15 @@ final class PairingManager {
     private func loadTrustedDevices() {
         let stored = UserDefaults.standard.stringArray(forKey: trustedDevicesKey) ?? []
         trustedDeviceIDs = Set(stored)
+        trustedDeviceSigningKeys = UserDefaults.standard.dictionary(forKey: trustedSigningKeysKey) as? [String: String] ?? [:]
     }
 
     private func persistTrustedDevices() {
         UserDefaults.standard.set(Array(trustedDeviceIDs).sorted(), forKey: trustedDevicesKey)
+    }
+
+    private func persistTrustedSigningKeys() {
+        UserDefaults.standard.set(trustedDeviceSigningKeys, forKey: trustedSigningKeysKey)
     }
 
     private static func makeCode() -> String {

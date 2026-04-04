@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import UIKit
 
 @MainActor
@@ -7,6 +8,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         case disconnected
         case connecting
         case connected
+        case securing
         case paired
         case failed(String)
     }
@@ -36,8 +38,16 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private var activeConnectionGeneration: UInt64 = 0
     private var audioDebugReceivedConfigCount = 0
     private var audioDebugReceivedFrameCount = 0
+    private var controlChannelKey: SymmetricKey?
+    private var mediaChannelKey: SymmetricKey?
+    private var localSigningPrivateKey = IOSWebSocketClient.loadOrCreateSigningPrivateKey()
+    private var handshakeEphemeralPrivateKey: Curve25519.KeyAgreement.PrivateKey?
+    private var pendingHostDeviceID: String?
+    private var hasCompletedSecureHandshake = false
+    private let fallbackDeviceID = UUID().uuidString
 
     private enum BinaryPacketMarker {
+        static let encryptedMedia: UInt8 = 0x7E
         static let h264Config: UInt8 = 0x10
         static let h264Frame: UInt8 = 0x11
         static let aacConfig: UInt8 = 0x20
@@ -84,6 +94,11 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
         pairedToken = nil
+        controlChannelKey = nil
+        mediaChannelKey = nil
+        handshakeEphemeralPrivateKey = nil
+        pendingHostDeviceID = nil
+        hasCompletedSecureHandshake = false
         if userInitiated {
             state = .disconnected
         }
@@ -142,7 +157,23 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private func sendMessage(_ message: RemoteMessage) {
         guard let task else { return }
         do {
-            let payload = try RemoteProtocolCodec.encode(message)
+            let outboundMessage: RemoteMessage
+            if shouldEncryptOutgoingControl(message: message) {
+                guard let key = controlChannelKey else {
+                    // Avoid leaking control intent before authenticated secure handshake is complete.
+                    return
+                }
+                let plaintext = try RemoteProtocolCodec.encode(message)
+                let sealedBox = try ChaChaPoly.seal(plaintext, using: key)
+                outboundMessage = .secureControl(
+                    payloadBase64: sealedBox.combined.base64EncodedString(),
+                    token: pairedToken
+                )
+            } else {
+                outboundMessage = message
+            }
+
+            let payload = try RemoteProtocolCodec.encode(outboundMessage)
             task.send(.data(payload)) { [weak self] error in
                 guard let self else { return }
                 if let error {
@@ -194,9 +225,10 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             case .pairAck:
                 if decoded.success == true, let token = decoded.token {
                     pairedToken = token
+                    pendingHostDeviceID = decoded.deviceID
                     reconnectAttempts = 0
-                    state = .paired
-                    startPing()
+                    state = .securing
+                    startSecureHandshake(using: token)
                 } else {
                     let reason = decoded.reason ?? "Pairing failed"
                     // Stop reconnect loops when pairing is rejected.
@@ -208,6 +240,8 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                 let reason = decoded.reason ?? "Unknown error"
                 onRemoteError?(reason)
                 state = .failed(reason)
+            case .e2eHelloAck:
+                handleSecureHelloAck(decoded)
             case .screenFrame:
                 if let frameBase64 = decoded.frameBase64,
                    let frameData = Data(base64Encoded: frameBase64) {
@@ -236,6 +270,19 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
 
     private func handleBinaryVideoPacket(_ data: Data) -> Bool {
         guard let marker = data.first, data.count > 1 else { return false }
+        if marker == BinaryPacketMarker.encryptedMedia {
+            guard let mediaChannelKey else { return false }
+            let combined = data.dropFirst()
+            do {
+                let sealedBox = try ChaChaPoly.SealedBox(combined: combined)
+                let plaintext = try ChaChaPoly.open(sealedBox, using: mediaChannelKey)
+                return handleBinaryVideoPacket(plaintext)
+            } catch {
+                handleError("Unable to decrypt media payload")
+                return true
+            }
+        }
+
         let payload = data.dropFirst()
 
         switch marker {
@@ -291,6 +338,11 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private func handleDisconnect(error: Error?) {
         stopPing()
         pairedToken = nil
+        controlChannelKey = nil
+        mediaChannelKey = nil
+        handshakeEphemeralPrivateKey = nil
+        pendingHostDeviceID = nil
+        hasCompletedSecureHandshake = false
 
         if let error {
             state = .failed(error.localizedDescription)
@@ -311,6 +363,137 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.connect(host: host, port: port, pairingCode: pairCode)
         }
+    }
+
+    private func shouldEncryptOutgoingControl(message: RemoteMessage) -> Bool {
+        guard hasCompletedSecureHandshake else { return false }
+        switch message.type {
+        case .text,
+             .key,
+             .mouseMove,
+             .mouseClick,
+             .mouseScroll,
+             .streamConfig,
+             .streamResync,
+             .audioConfig,
+             .permissionStatusRequest,
+             .permissionAction,
+             .trustControl:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func makeControlChannelKey(from token: String) -> SymmetricKey {
+        SymmetricKey(data: Data(token.utf8))
+    }
+
+    private func startSecureHandshake(using token: String) {
+        do {
+            let ephemeralPrivateKey = Curve25519.KeyAgreement.PrivateKey()
+            handshakeEphemeralPrivateKey = ephemeralPrivateKey
+            let deviceID = deviceIdentifier ?? fallbackDeviceID
+            let ephemeralPublicData = ephemeralPrivateKey.publicKey.rawRepresentation
+            let signingPublicData = localSigningPrivateKey.publicKey.rawRepresentation
+            let signaturePayload = Self.signaturePayload(token: token, deviceID: deviceID, ephemeralPublicKey: ephemeralPublicData)
+            let signature = try localSigningPrivateKey.signature(for: signaturePayload)
+
+            sendMessage(.e2eHello(
+                deviceID: deviceID,
+                signingPublicKey: signingPublicData.base64EncodedString(),
+                ephemeralPublicKey: ephemeralPublicData.base64EncodedString(),
+                signature: signature.base64EncodedString(),
+                token: token
+            ))
+        } catch {
+            handleError("Failed to start secure handshake")
+        }
+    }
+
+    private func handleSecureHelloAck(_ message: RemoteMessage) {
+        guard let token = pairedToken,
+              let hostDeviceID = message.deviceID,
+              let hostSigningPublicKeyBase64 = message.signingPublicKey,
+              let hostEphemeralPublicKeyBase64 = message.ephemeralPublicKey,
+              let signatureBase64 = message.signature,
+              let hostSigningPublicKeyData = Data(base64Encoded: hostSigningPublicKeyBase64),
+              let hostEphemeralPublicKeyData = Data(base64Encoded: hostEphemeralPublicKeyBase64),
+              let signatureData = Data(base64Encoded: signatureBase64),
+              let ephemeralPrivateKey = handshakeEphemeralPrivateKey else {
+            handleError("Malformed secure handshake response")
+            return
+        }
+
+        guard verifyOrPinHostSigningKey(hostDeviceID: hostDeviceID, signingPublicKeyBase64: hostSigningPublicKeyBase64) else {
+            handleError("Host identity key mismatch. Re-pair required.")
+            return
+        }
+
+        do {
+            let hostSigningPublicKey = try Curve25519.Signing.PublicKey(rawRepresentation: hostSigningPublicKeyData)
+            let signaturePayload = Self.signaturePayload(token: token, deviceID: hostDeviceID, ephemeralPublicKey: hostEphemeralPublicKeyData)
+            guard hostSigningPublicKey.isValidSignature(signatureData, for: signaturePayload) else {
+                handleError("Invalid secure handshake signature")
+                return
+            }
+
+            let hostEphemeralPublicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: hostEphemeralPublicKeyData)
+            let sharedSecret = try ephemeralPrivateKey.sharedSecretFromKeyAgreement(with: hostEphemeralPublicKey)
+            let salt = Data(token.utf8)
+            controlChannelKey = sharedSecret.hkdfDerivedSymmetricKey(
+                using: SHA256.self,
+                salt: salt,
+                sharedInfo: Data("iMote.e2e.control.v1".utf8),
+                outputByteCount: 32
+            )
+            mediaChannelKey = sharedSecret.hkdfDerivedSymmetricKey(
+                using: SHA256.self,
+                salt: salt,
+                sharedInfo: Data("iMote.e2e.media.v1".utf8),
+                outputByteCount: 32
+            )
+            hasCompletedSecureHandshake = true
+            state = .paired
+            startPing()
+        } catch {
+            handleError("Failed to finalize secure handshake")
+        }
+    }
+
+    private static func signaturePayload(token: String, deviceID: String, ephemeralPublicKey: Data) -> Data {
+        var payload = Data()
+        payload.append(contentsOf: Data("iMote.e2e.handshake.v1|".utf8))
+        payload.append(contentsOf: Data(token.utf8))
+        payload.append(contentsOf: Data("|".utf8))
+        payload.append(contentsOf: Data(deviceID.utf8))
+        payload.append(contentsOf: Data("|".utf8))
+        payload.append(ephemeralPublicKey)
+        return payload
+    }
+
+    private static func loadOrCreateSigningPrivateKey() -> Curve25519.Signing.PrivateKey {
+        let keyName = "remoteKeyboard.ios.signingPrivateKey"
+        if let stored = UserDefaults.standard.string(forKey: keyName),
+           let storedData = Data(base64Encoded: stored),
+           let existing = try? Curve25519.Signing.PrivateKey(rawRepresentation: storedData) {
+            return existing
+        }
+
+        let created = Curve25519.Signing.PrivateKey()
+        UserDefaults.standard.set(created.rawRepresentation.base64EncodedString(), forKey: keyName)
+        return created
+    }
+
+    private func verifyOrPinHostSigningKey(hostDeviceID: String, signingPublicKeyBase64: String) -> Bool {
+        let keyName = "remoteKeyboard.ios.trustedHostSigningKeys"
+        var map = UserDefaults.standard.dictionary(forKey: keyName) as? [String: String] ?? [:]
+        if let existing = map[hostDeviceID] {
+            return existing == signingPublicKeyBase64
+        }
+        map[hostDeviceID] = signingPublicKeyBase64
+        UserDefaults.standard.set(map, forKey: keyName)
+        return true
     }
 }
 
