@@ -248,6 +248,9 @@ final class MacWebSocketServer: @unchecked Sendable {
             context.token = token
             context.deviceName = message.deviceName
             clients[id] = context
+            // Ensure newly paired/reconnected clients always receive a fresh
+            // config + keyframe sequence so decoder state can recover.
+            h264Encoder.requestStreamResync()
             send(.pairAck(success: true, token: token, reason: nil), to: id)
             sendStreamStatus(to: id)
             publishClients()
