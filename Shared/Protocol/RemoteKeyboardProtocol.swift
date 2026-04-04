@@ -172,16 +172,31 @@ public struct RemoteMessage: Codable, Sendable {
         RemoteMessage(type: .key, key: key, modifiers: modifiers, action: action, token: token)
     }
 
-    public static func mouseMove(deltaX: Double, deltaY: Double, token: String?) -> RemoteMessage {
-        RemoteMessage(type: .mouseMove, token: token, deltaX: deltaX, deltaY: deltaY)
+    public static func mouseMove(
+        deltaX: Double,
+        deltaY: Double,
+        modifiers: [RemoteModifier] = [],
+        token: String?
+    ) -> RemoteMessage {
+        RemoteMessage(type: .mouseMove, modifiers: modifiers, token: token, deltaX: deltaX, deltaY: deltaY)
     }
 
-    public static func mouseClick(button: MouseButton, action: KeyAction = .tap, token: String?) -> RemoteMessage {
-        RemoteMessage(type: .mouseClick, action: action, token: token, button: button)
+    public static func mouseClick(
+        button: MouseButton,
+        modifiers: [RemoteModifier] = [],
+        action: KeyAction = .tap,
+        token: String?
+    ) -> RemoteMessage {
+        RemoteMessage(type: .mouseClick, modifiers: modifiers, action: action, token: token, button: button)
     }
 
-    public static func mouseScroll(scrollX: Double, scrollY: Double, token: String?) -> RemoteMessage {
-        RemoteMessage(type: .mouseScroll, token: token, scrollX: scrollX, scrollY: scrollY)
+    public static func mouseScroll(
+        scrollX: Double,
+        scrollY: Double,
+        modifiers: [RemoteModifier] = [],
+        token: String?
+    ) -> RemoteMessage {
+        RemoteMessage(type: .mouseScroll, modifiers: modifiers, token: token, scrollX: scrollX, scrollY: scrollY)
     }
 
     public static func cursorPosition(x: Double, y: Double) -> RemoteMessage {

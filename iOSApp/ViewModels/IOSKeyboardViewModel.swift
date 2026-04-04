@@ -382,15 +382,15 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     func moveMouse(deltaX: Double, deltaY: Double) {
-        client.sendMouseMove(deltaX: deltaX, deltaY: deltaY)
+        client.sendMouseMove(deltaX: deltaX, deltaY: deltaY, modifiers: Array(activeModifiers))
     }
 
     func clickMouse(button: MouseButton, action: KeyAction = .tap) {
-        client.sendMouseClick(button: button, action: action)
+        client.sendMouseClick(button: button, modifiers: Array(activeModifiers), action: action)
     }
 
     func scrollMouse(deltaX: Double, deltaY: Double) {
-        client.sendMouseScroll(scrollX: deltaX, scrollY: deltaY)
+        client.sendMouseScroll(scrollX: deltaX, scrollY: deltaY, modifiers: Array(activeModifiers))
     }
 
     func setPreviewQualityMode(_ mode: PreviewQualityMode) {

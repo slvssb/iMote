@@ -60,6 +60,10 @@ final class KeyboardInjector {
         case .up:
             try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
         case .tap:
+            if shouldUseControlArrowShortcutPath(keyCode: keyCode, modifiers: modifiers) {
+                try postControlArrowViaHID(keyCode: keyCode)
+                return
+            }
             if modifiers.isEmpty {
                 try postKeyEvent(keyCode: keyCode, keyDown: true, flags: flags)
                 try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
@@ -69,7 +73,7 @@ final class KeyboardInjector {
         }
     }
 
-    func injectMouseMove(deltaX: Double, deltaY: Double) throws {
+    func injectMouseMove(deltaX: Double, deltaY: Double, modifiers: [RemoteModifier] = []) throws {
         if permissionManager.isTrusted() == false {
             throw KeyboardInjectorError.accessibilityPermissionMissing
         }
@@ -93,11 +97,12 @@ final class KeyboardInjector {
         ) else {
             throw KeyboardInjectorError.eventBuildFailed
         }
+        moveEvent.flags = mapper.eventFlags(for: modifiers)
 
         moveEvent.post(tap: .cghidEventTap)
     }
 
-    func injectMouseClick(button: MouseButton, action: KeyAction) throws {
+    func injectMouseClick(button: MouseButton, modifiers: [RemoteModifier] = [], action: KeyAction) throws {
         if permissionManager.isTrusted() == false {
             throw KeyboardInjectorError.accessibilityPermissionMissing
         }
@@ -130,18 +135,47 @@ final class KeyboardInjector {
         switch action {
         case .down:
             pressedMouseButtons.insert(button)
-            try postMouseEvent(source: eventSource, type: downType, point: cursor, button: mappedButton, clickState: 1)
+            try postMouseEvent(
+                source: eventSource,
+                type: downType,
+                point: cursor,
+                button: mappedButton,
+                clickState: 1,
+                flags: mapper.eventFlags(for: modifiers)
+            )
         case .up:
             pressedMouseButtons.remove(button)
-            try postMouseEvent(source: eventSource, type: upType, point: cursor, button: mappedButton, clickState: 1)
+            try postMouseEvent(
+                source: eventSource,
+                type: upType,
+                point: cursor,
+                button: mappedButton,
+                clickState: 1,
+                flags: mapper.eventFlags(for: modifiers)
+            )
         case .tap:
             let clickState = nextClickState(for: button, at: cursor)
-            try postMouseEvent(source: eventSource, type: downType, point: cursor, button: mappedButton, clickState: clickState)
-            try postMouseEvent(source: eventSource, type: upType, point: cursor, button: mappedButton, clickState: clickState)
+            let flags = mapper.eventFlags(for: modifiers)
+            try postMouseEvent(
+                source: eventSource,
+                type: downType,
+                point: cursor,
+                button: mappedButton,
+                clickState: clickState,
+                flags: flags
+            )
+            try postMouseEvent(
+                source: eventSource,
+                type: upType,
+                point: cursor,
+                button: mappedButton,
+                clickState: clickState,
+                flags: flags
+            )
         }
     }
 
-    func injectMouseScroll(scrollX: Double, scrollY: Double) throws {
+    func injectMouseScroll(scrollX: Double, scrollY: Double, modifiers: [RemoteModifier] = []) throws {
         if permissionManager.isTrusted() == false {
             throw KeyboardInjectorError.accessibilityPermissionMissing
         }
@@ -160,6 +194,7 @@ final class KeyboardInjector {
         ) else {
             throw KeyboardInjectorError.eventBuildFailed
         }
+        event.flags = mapper.eventFlags(for: modifiers)
 
         event.post(tap: .cghidEventTap)
     }
@@ -170,8 +205,24 @@ final class KeyboardInjector {
         flags: CGEventFlags,
         tap: CGEventTapLocation = .cgSessionEventTap
     ) throws {
+        try postKeyEvent(
+            keyCode: keyCode,
+            keyDown: keyDown,
+            flags: flags,
+            sourceState: .combinedSessionState,
+            tap: tap
+        )
+    }
+
+    private func postKeyEvent(
+        keyCode: CGKeyCode,
+        keyDown: Bool,
+        flags: CGEventFlags,
+        sourceState: CGEventSourceStateID,
+        tap: CGEventTapLocation
+    ) throws {
         guard
-            let source = CGEventSource(stateID: .combinedSessionState),
+            let source = CGEventSource(stateID: sourceState),
             let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: keyDown)
         else {
             throw KeyboardInjectorError.eventBuildFailed
@@ -200,6 +251,47 @@ final class KeyboardInjector {
         }
     }
 
+    private func shouldUseControlArrowShortcutPath(keyCode: CGKeyCode, modifiers: [RemoteModifier]) -> Bool {
+        guard modifiers.count == 1, modifiers.first == .control else { return false }
+        return (123...126).contains(Int(keyCode))
+    }
+
+    private func postControlArrowViaHID(keyCode: CGKeyCode) throws {
+        guard let controlKeyCode = modifierKeyCode(for: .control) else {
+            throw KeyboardInjectorError.eventBuildFailed
+        }
+
+        let controlFlags: CGEventFlags = [.maskControl]
+        try postKeyEvent(
+            keyCode: controlKeyCode,
+            keyDown: true,
+            flags: controlFlags,
+            sourceState: .hidSystemState,
+            tap: .cghidEventTap
+        )
+        try postKeyEvent(
+            keyCode: keyCode,
+            keyDown: true,
+            flags: controlFlags,
+            sourceState: .hidSystemState,
+            tap: .cghidEventTap
+        )
+        try postKeyEvent(
+            keyCode: keyCode,
+            keyDown: false,
+            flags: controlFlags,
+            sourceState: .hidSystemState,
+            tap: .cghidEventTap
+        )
+        try postKeyEvent(
+            keyCode: controlKeyCode,
+            keyDown: false,
+            flags: [],
+            sourceState: .hidSystemState,
+            tap: .cghidEventTap
+        )
+    }
+
     private func modifierKeyCode(for modifier: RemoteModifier) -> CGKeyCode? {
         switch modifier {
         case .command:
@@ -218,7 +310,8 @@ final class KeyboardInjector {
         type: CGEventType,
         point: CGPoint,
         button: CGMouseButton,
-        clickState: Int64
+        clickState: Int64,
+        flags: CGEventFlags = []
     ) throws {
         guard let event = CGEvent(
             mouseEventSource: source,
@@ -230,6 +323,7 @@ final class KeyboardInjector {
         }
 
         event.setIntegerValueField(.mouseEventClickState, value: clickState)
+        event.flags = flags
         event.post(tap: .cghidEventTap)
     }
 

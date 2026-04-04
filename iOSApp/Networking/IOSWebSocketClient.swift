@@ -98,16 +98,16 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(RemoteMessage.key(key, modifiers: modifiers, action: action, token: pairedToken))
     }
 
-    func sendMouseMove(deltaX: Double, deltaY: Double) {
-        sendMessage(RemoteMessage.mouseMove(deltaX: deltaX, deltaY: deltaY, token: pairedToken))
+    func sendMouseMove(deltaX: Double, deltaY: Double, modifiers: [RemoteModifier] = []) {
+        sendMessage(RemoteMessage.mouseMove(deltaX: deltaX, deltaY: deltaY, modifiers: modifiers, token: pairedToken))
     }
 
-    func sendMouseClick(button: MouseButton, action: KeyAction = .tap) {
-        sendMessage(RemoteMessage.mouseClick(button: button, action: action, token: pairedToken))
+    func sendMouseClick(button: MouseButton, modifiers: [RemoteModifier] = [], action: KeyAction = .tap) {
+        sendMessage(RemoteMessage.mouseClick(button: button, modifiers: modifiers, action: action, token: pairedToken))
     }
 
-    func sendMouseScroll(scrollX: Double, scrollY: Double) {
-        sendMessage(RemoteMessage.mouseScroll(scrollX: scrollX, scrollY: scrollY, token: pairedToken))
+    func sendMouseScroll(scrollX: Double, scrollY: Double, modifiers: [RemoteModifier] = []) {
+        sendMessage(RemoteMessage.mouseScroll(scrollX: scrollX, scrollY: scrollY, modifiers: modifiers, token: pairedToken))
     }
 
     func sendStreamConfig(qualityMode: PreviewQualityMode, previewZoomLevel: Double?) {

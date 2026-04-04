@@ -349,10 +349,11 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         let deltaX = message.deltaX ?? 0
         let deltaY = message.deltaY ?? 0
+        let modifiers = message.modifiers ?? []
         guard deltaX != 0 || deltaY != 0 else { return }
 
         do {
-            try injector.injectMouseMove(deltaX: deltaX, deltaY: deltaY)
+            try injector.injectMouseMove(deltaX: deltaX, deltaY: deltaY, modifiers: modifiers)
         } catch {
             send(.error(error.localizedDescription), to: id)
         }
@@ -368,9 +369,10 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         let action = message.action ?? .tap
         let button = message.button ?? .left
+        let modifiers = message.modifiers ?? []
 
         do {
-            try injector.injectMouseClick(button: button, action: action)
+            try injector.injectMouseClick(button: button, modifiers: modifiers, action: action)
         } catch {
             send(.error(error.localizedDescription), to: id)
         }
@@ -386,10 +388,11 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         let scrollX = message.scrollX ?? 0
         let scrollY = message.scrollY ?? 0
+        let modifiers = message.modifiers ?? []
         guard scrollX != 0 || scrollY != 0 else { return }
 
         do {
-            try injector.injectMouseScroll(scrollX: scrollX, scrollY: scrollY)
+            try injector.injectMouseScroll(scrollX: scrollX, scrollY: scrollY, modifiers: modifiers)
         } catch {
             send(.error(error.localizedDescription), to: id)
         }
