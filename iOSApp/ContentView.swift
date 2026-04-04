@@ -21,6 +21,7 @@ struct ContentView: View {
         static let scrollMultiplier: Double = 1.2
         static let previewCornerRadius: CGFloat = 18
         static let previewTopGlowHeight: CGFloat = 160
+        static let previewHorizontalInset: CGFloat = 4
     }
 
 private struct FixedScreenPreview: View {
@@ -229,7 +230,8 @@ private struct MacCenteredLogoOverlay: View {
                         let topInset = resolvedTopInset(geometrySafeAreaTop: geometry.safeAreaInsets.top)
                         let previewAspectSource = lockedDisconnectPreviewAspectRatio ?? viewModel.screenPreview.sourceAspectRatio
                         let previewAspect = max(previewAspectSource, 0.01)
-                        let previewHeight = geometry.size.width / previewAspect
+                        let previewWidth = max(geometry.size.width - (Layout.previewHorizontalInset * 2), 1)
+                        let previewHeight = previewWidth / previewAspect
 
                         if isImmersiveLandscapeModeEnabled {
                             ZStack(alignment: .topTrailing) {
@@ -329,7 +331,7 @@ private struct MacCenteredLogoOverlay: View {
                                     .animation(.easeInOut(duration: 0.35), value: isPreviewSectionVisible)
                                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     .frame(height: previewHeight)
-                                    .padding(.horizontal, 4)
+                                    .padding(.horizontal, Layout.previewHorizontalInset)
                                     .allowsHitTesting(isPreviewSectionVisible)
 
                                 previewStatsStrip
@@ -562,12 +564,14 @@ private struct MacCenteredLogoOverlay: View {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .center)
             } else if canConnect == false {
                 Text(connectDisabledReason)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
