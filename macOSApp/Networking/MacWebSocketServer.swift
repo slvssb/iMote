@@ -39,8 +39,11 @@ final class MacWebSocketServer: @unchecked Sendable {
     private let aacEncoder = AACAudioEncoder()
     private let queue = DispatchQueue(label: "remote.keyboard.mac.ws")
     private var thermalObserver: NSObjectProtocol?
+    private var workspaceSleepObserver: NSObjectProtocol?
+    private var workspaceWakeObserver: NSObjectProtocol?
 
     private var listener: NWListener?
+    private var listenerPort: UInt16 = 8989
     private var clients: [UUID: ClientContext] = [:]
     private var frameTimer: DispatchSourceTimer?
     private var isFrameCaptureInFlight = false
@@ -60,6 +63,8 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var audioDebugSentFrameCount = 0
     private var localSigningPrivateKey = MacWebSocketServer.loadOrCreateSigningPrivateKey()
     private let hostDeviceID = MacWebSocketServer.loadOrCreateHostDeviceID()
+    private var isSystemSleeping = false
+    private var isWakeRecoveryInProgress = false
 
     private enum BinaryPacketMarker {
         static let encryptedMedia: UInt8 = 0x7E
@@ -131,15 +136,46 @@ final class MacWebSocketServer: @unchecked Sendable {
                 self.handleThermalStateChange(state)
             }
         }
+
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        workspaceSleepObserver = workspaceCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.queue.async { [weak self] in
+                self?.handleSystemWillSleep()
+            }
+        }
+
+        workspaceWakeObserver = workspaceCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.queue.async { [weak self] in
+                self?.handleSystemDidWake()
+            }
+        }
     }
 
     deinit {
         if let thermalObserver {
             NotificationCenter.default.removeObserver(thermalObserver)
         }
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        if let workspaceSleepObserver {
+            workspaceCenter.removeObserver(workspaceSleepObserver)
+        }
+        if let workspaceWakeObserver {
+            workspaceCenter.removeObserver(workspaceWakeObserver)
+        }
     }
 
     func start(port: UInt16 = 8989) throws {
+        listenerPort = port
         if listener != nil {
             return
         }
@@ -746,6 +782,10 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func broadcastScreenFrame() {
+        guard isSystemSleeping == false, isWakeRecoveryInProgress == false else {
+            return
+        }
+
         let pairedClientIDs = clients.compactMap { id, context in
             context.token == nil ? nil : id
         }
@@ -791,6 +831,70 @@ final class MacWebSocketServer: @unchecked Sendable {
                 self.adaptiveWindowEncodedCount += 1
                 self.updateAdaptiveBitrateIfNeeded()
             }
+        }
+    }
+
+    private func handleSystemWillSleep() {
+        isSystemSleeping = true
+        isFrameCaptureInFlight = false
+        consecutiveFrameFailures = 0
+    }
+
+    private func handleSystemDidWake() {
+        isSystemSleeping = false
+        guard isWakeRecoveryInProgress == false else { return }
+        isWakeRecoveryInProgress = true
+
+        let maxWidth = previewCaptureMaxWidth
+        Task { [weak self] in
+            guard let self else { return }
+            let recovered = await self.screenCaptureProvider.recoverAfterSystemWake(maxWidth: maxWidth)
+            self.queue.async { [weak self] in
+                guard let self else { return }
+                self.isWakeRecoveryInProgress = false
+                self.isFrameCaptureInFlight = false
+                self.consecutiveFrameFailures = 0
+
+                if recovered {
+                    self.h264Encoder.requestStreamResync()
+                    self.aacEncoder.requestStreamResync()
+                    Task { @MainActor in
+                        self.onStateChange?("Recovered capture after wake")
+                    }
+                } else {
+                    self.forceRestartServerAfterWakeFailure()
+                }
+            }
+        }
+    }
+
+    private func forceRestartServerAfterWakeFailure() {
+        let port = listenerPort
+
+        clients.values.forEach { context in
+            context.connection.cancel()
+        }
+        clients.removeAll()
+        listener?.cancel()
+        listener = nil
+        stopFrameBroadcasting()
+        isFrameCaptureInFlight = false
+        consecutiveFrameFailures = 0
+
+        Task { [weak self] in
+            await self?.screenCaptureProvider.stopCapture()
+        }
+        h264Encoder.stop()
+        aacEncoder.stop()
+        publishClients()
+
+        do {
+            try start(port: port)
+            Task { @MainActor in
+                self.onStateChange?("Wake recovery fallback: listener restarted")
+            }
+        } catch {
+            reportError("Wake recovery restart failed: \(error.localizedDescription)")
         }
     }
 

@@ -62,6 +62,26 @@ actor MacScreenCaptureProvider {
         self.activeMaxWidth = 0
     }
 
+    func recoverAfterSystemWake(maxWidth: CGFloat = 1920) async -> Bool {
+        await stopCapture()
+        contentFilter = nil
+        sourceWidth = 0
+        sourceHeight = 0
+        displayFrame = .zero
+
+        do {
+            try await prepareCaptureFilter()
+            guard let filter = contentFilter, sourceWidth > 0, sourceHeight > 0 else {
+                return false
+            }
+            let targetWidth = max(1, maxWidth)
+            try await rebuildCaptureStream(filter: filter, maxWidth: targetWidth)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     func setAudioCaptureSource(_ source: AudioCaptureSource) async {
         guard audioCaptureSource != source else { return }
         audioCaptureSource = source
