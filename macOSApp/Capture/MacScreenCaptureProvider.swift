@@ -9,6 +9,10 @@ struct CapturedPixelBuffer: @unchecked Sendable {
     let value: CVPixelBuffer
 }
 
+struct CapturedAudioSampleBuffer: @unchecked Sendable {
+    let value: CMSampleBuffer
+}
+
 actor MacScreenCaptureProvider {
     private static let targetFPS: Int32 = 60
 
@@ -21,6 +25,8 @@ actor MacScreenCaptureProvider {
     private let outputQueue = DispatchQueue(label: "remote.keyboard.capture.output")
     private var latestPixelBuffer: CapturedPixelBuffer?
     private var activeMaxWidth: CGFloat = 0
+    private var audioCaptureSource: AudioCaptureSource = .systemOutput
+    private var audioSampleHandler: ((CapturedAudioSampleBuffer) -> Void)?
 
     func makeFramePixelBuffer(maxWidth: CGFloat = 1920) async -> CapturedPixelBuffer? {
         do {
@@ -46,12 +52,26 @@ actor MacScreenCaptureProvider {
             try? await stream.stopCapture()
             if let streamOutput {
                 try? stream.removeStreamOutput(streamOutput, type: .screen)
+                try? stream.removeStreamOutput(streamOutput, type: .audio)
+                try? stream.removeStreamOutput(streamOutput, type: .microphone)
             }
         }
         self.stream = nil
         self.streamOutput = nil
         self.latestPixelBuffer = nil
         self.activeMaxWidth = 0
+    }
+
+    func setAudioCaptureSource(_ source: AudioCaptureSource) async {
+        guard audioCaptureSource != source else { return }
+        audioCaptureSource = source
+        if let filter = contentFilter {
+            try? await rebuildCaptureStream(filter: filter, maxWidth: activeMaxWidth > 0 ? activeMaxWidth : 1920)
+        }
+    }
+
+    func setAudioSampleHandler(_ handler: ((CapturedAudioSampleBuffer) -> Void)?) {
+        audioSampleHandler = handler
     }
 
     func normalizedCursorPosition() -> CGPoint? {
@@ -89,6 +109,8 @@ actor MacScreenCaptureProvider {
             try? await stream.stopCapture()
             if let streamOutput {
                 try? stream.removeStreamOutput(streamOutput, type: .screen)
+                try? stream.removeStreamOutput(streamOutput, type: .audio)
+                try? stream.removeStreamOutput(streamOutput, type: .microphone)
             }
         }
 
@@ -100,10 +122,31 @@ actor MacScreenCaptureProvider {
         config.queueDepth = 8
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = true
+        config.sampleRate = 48_000
+        config.channelCount = 2
+        config.excludesCurrentProcessAudio = true
+
+        switch audioCaptureSource {
+        case .systemOutput:
+            config.capturesAudio = true
+            config.captureMicrophone = false
+        case .microphone:
+            config.capturesAudio = false
+            config.captureMicrophone = true
+        case .systemAndMicrophone:
+            config.capturesAudio = true
+            config.captureMicrophone = true
+        }
 
         let streamOutput = StreamOutput(owner: self)
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
         try stream.addStreamOutput(streamOutput, type: .screen, sampleHandlerQueue: outputQueue)
+        if config.capturesAudio {
+            try stream.addStreamOutput(streamOutput, type: .audio, sampleHandlerQueue: outputQueue)
+        }
+        if config.captureMicrophone {
+            try stream.addStreamOutput(streamOutput, type: .microphone, sampleHandlerQueue: outputQueue)
+        }
         try await stream.startCapture()
 
         self.stream = stream
@@ -114,6 +157,10 @@ actor MacScreenCaptureProvider {
     fileprivate func consumeFrame(_ pixelBuffer: CapturedPixelBuffer) {
         latestPixelBuffer = pixelBuffer
     }
+
+    fileprivate func consumeAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
+        audioSampleHandler?(sampleBuffer)
+    }
 }
 private final class StreamOutput: NSObject, SCStreamOutput {
     private weak var owner: MacScreenCaptureProvider?
@@ -123,17 +170,26 @@ private final class StreamOutput: NSObject, SCStreamOutput {
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
-        guard outputType == .screen,
-              sampleBuffer.isValid,
+        guard sampleBuffer.isValid,
               CMSampleBufferDataIsReady(sampleBuffer),
-              let imageBuffer = sampleBuffer.imageBuffer else {
+              let owner else {
             return
         }
-        guard let owner else { return }
 
-        let frame = CapturedPixelBuffer(value: imageBuffer)
-        Task {
-            await owner.consumeFrame(frame)
+        switch outputType {
+        case .screen:
+            guard let imageBuffer = sampleBuffer.imageBuffer else { return }
+            let frame = CapturedPixelBuffer(value: imageBuffer)
+            Task {
+                await owner.consumeFrame(frame)
+            }
+        case .audio, .microphone:
+            let audioSample = CapturedAudioSampleBuffer(value: sampleBuffer)
+            Task {
+                await owner.consumeAudioSampleBuffer(audioSample)
+            }
+        @unknown default:
+            return
         }
     }
 }

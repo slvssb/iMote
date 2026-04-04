@@ -13,6 +13,7 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case streamResync
     case trustControl
     case streamStatus
+    case audioConfig
     case screenFrame
     case ping
     case pong
@@ -43,6 +44,12 @@ public enum PreviewQualityMode: String, Codable, CaseIterable, Sendable {
     case ultra
 }
 
+public enum AudioCaptureSource: String, Codable, CaseIterable, Sendable {
+    case systemOutput
+    case microphone
+    case systemAndMicrophone
+}
+
 public enum TrustControlAction: String, Codable, Sendable {
     case forgetCurrentDevice
 }
@@ -71,6 +78,7 @@ public struct RemoteMessage: Codable, Sendable {
     public var trustAction: TrustControlAction?
     public var thermalOverrideActive: Bool?
     public var frameBase64: String?
+    public var audioSource: AudioCaptureSource?
 
     public init(
         type: RemoteMessageType,
@@ -95,7 +103,8 @@ public struct RemoteMessage: Codable, Sendable {
         previewZoomLevel: Double? = nil,
         trustAction: TrustControlAction? = nil,
         thermalOverrideActive: Bool? = nil,
-        frameBase64: String? = nil
+        frameBase64: String? = nil,
+        audioSource: AudioCaptureSource? = nil
     ) {
         self.type = type
         self.value = value
@@ -120,6 +129,7 @@ public struct RemoteMessage: Codable, Sendable {
         self.trustAction = trustAction
         self.thermalOverrideActive = thermalOverrideActive
         self.frameBase64 = frameBase64
+        self.audioSource = audioSource
     }
 
     public static func pair(code: String, deviceName: String, deviceID: String?) -> RemoteMessage {
@@ -173,6 +183,10 @@ public struct RemoteMessage: Codable, Sendable {
 
     public static func streamStatus(thermalOverrideActive: Bool) -> RemoteMessage {
         RemoteMessage(type: .streamStatus, thermalOverrideActive: thermalOverrideActive)
+    }
+
+    public static func audioConfig(source: AudioCaptureSource, token: String?) -> RemoteMessage {
+        RemoteMessage(type: .audioConfig, token: token, audioSource: source)
     }
 
     public static func screenFrame(frameBase64: String) -> RemoteMessage {

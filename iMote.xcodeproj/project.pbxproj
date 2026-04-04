@@ -17,6 +17,8 @@
 		3413DD912F7F15F80086D1D8 /* H264FrameDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD902F7F15F80086D1D8 /* H264FrameDecoder.swift */; };
 		3413DD952F7F269E0086D1D8 /* MacStyleKeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD942F7F269E0086D1D8 /* MacStyleKeyboardView.swift */; };
 		3413DD972F8050EA0086D1D8 /* EyeCursorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD962F8050EA0086D1D8 /* EyeCursorController.swift */; };
+		3413DD992F80E1890086D1D8 /* AACAudioEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD982F80E1890086D1D8 /* AACAudioEncoder.swift */; };
+		3413DD9B2F80E1890086D1D8 /* AACAudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD9A2F80E1890086D1D8 /* AACAudioPlayer.swift */; };
 		388C9DE262521143AD7A098B /* KeyCodeMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A4ED6A00C3BE9BCC77CFA0 /* KeyCodeMapper.swift */; };
 		3AE8844EF95C010D3EDD1BB5 /* KeyboardInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B5A789ADC802F2FFA34809 /* KeyboardInjector.swift */; };
 		3B321DF188E6DA67E424EA2C /* RemoteKeyboardProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */; };
@@ -49,6 +51,8 @@
 		3413DD902F7F15F80086D1D8 /* H264FrameDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = H264FrameDecoder.swift; sourceTree = "<group>"; };
 		3413DD942F7F269E0086D1D8 /* MacStyleKeyboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacStyleKeyboardView.swift; sourceTree = "<group>"; };
 		3413DD962F8050EA0086D1D8 /* EyeCursorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EyeCursorController.swift; sourceTree = "<group>"; };
+		3413DD982F80E1890086D1D8 /* AACAudioEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AACAudioEncoder.swift; sourceTree = "<group>"; };
+		3413DD9A2F80E1890086D1D8 /* AACAudioPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AACAudioPlayer.swift; sourceTree = "<group>"; };
 		3D8653253EC541A234D5C4AA /* MacWebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacWebSocketServer.swift; sourceTree = "<group>"; };
 		4475252E2ACD2E5D3553A12B /* IOSWebSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSWebSocketClient.swift; sourceTree = "<group>"; };
 		48B64DEDE8DA2202F1905FB6 /* KeyboardKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardKey.swift; sourceTree = "<group>"; };
@@ -122,6 +126,7 @@
 			isa = PBXGroup;
 			children = (
 				3413DD8E2F7F15D50086D1D8 /* H264FrameEncoder.swift */,
+				3413DD982F80E1890086D1D8 /* AACAudioEncoder.swift */,
 			);
 			path = Streaming;
 			sourceTree = "<group>";
@@ -130,6 +135,7 @@
 			isa = PBXGroup;
 			children = (
 				3413DD902F7F15F80086D1D8 /* H264FrameDecoder.swift */,
+				3413DD9A2F80E1890086D1D8 /* AACAudioPlayer.swift */,
 			);
 			path = Streaming;
 			sourceTree = "<group>";
@@ -362,6 +368,7 @@
 				52A766052B849140BB2B6021 /* MacAppState.swift in Sources */,
 				3413DD812F7F058C0086D1D8 /* MacScreenCaptureProvider.swift in Sources */,
 				BAB45B3ADCC83FC094122A83 /* MacWebSocketServer.swift in Sources */,
+				3413DD992F80E1890086D1D8 /* AACAudioEncoder.swift in Sources */,
 				46D6A68727A71EEA2AD55B25 /* MenuBarMenuView.swift in Sources */,
 				7B495C10B03F7C21BC7B604F /* PairingManager.swift in Sources */,
 				445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */,
@@ -380,6 +387,7 @@
 				7BBE0F435484393B42B37307 /* HiddenTextInputView.swift in Sources */,
 				4A93D86DF6015B98A2392104 /* IOSKeyboardViewModel.swift in Sources */,
 				3413DD832F7F0E710086D1D8 /* ScreenPreviewState.swift in Sources */,
+				3413DD9B2F80E1890086D1D8 /* AACAudioPlayer.swift in Sources */,
 				3261C6035CBC1C82644C0DF8 /* IOSWebSocketClient.swift in Sources */,
 				185671B290F060D34E4FD573 /* KeyboardKey.swift in Sources */,
 				3413DD952F7F269E0086D1D8 /* MacStyleKeyboardView.swift in Sources */,
@@ -419,7 +427,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = iMote;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
@@ -439,7 +447,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = iMote;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;

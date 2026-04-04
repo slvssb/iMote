@@ -27,6 +27,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private let injector: KeyboardInjector
     private let screenCaptureProvider = MacScreenCaptureProvider()
     private let h264Encoder = H264FrameEncoder()
+    private let aacEncoder = AACAudioEncoder()
     private let queue = DispatchQueue(label: "remote.keyboard.mac.ws")
     private var thermalObserver: NSObjectProtocol?
 
@@ -38,6 +39,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var userSelectedQualityMode: PreviewQualityMode = .ultra
     private var effectiveQualityMode: PreviewQualityMode = .ultra
     private var requestedPreviewZoomLevel: Double = 1.0
+    private var selectedAudioCaptureSource: AudioCaptureSource = .systemOutput
     private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     private var isThermalOverrideActive = false
     private var previewCaptureMaxWidth: CGFloat = 1920
@@ -45,6 +47,8 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var adaptiveWindowTickCount = 0
     private var adaptiveWindowSkippedCount = 0
     private var adaptiveWindowEncodedCount = 0
+    private var audioDebugSentConfigCount = 0
+    private var audioDebugSentFrameCount = 0
 
     init(pairingManager: PairingManager, injector: KeyboardInjector) {
         self.pairingManager = pairingManager
@@ -60,6 +64,36 @@ final class MacWebSocketServer: @unchecked Sendable {
                     self.sendBinaryFrame(packet, to: id)
                 }
             }
+        }
+
+        aacEncoder.onPacket = { [weak self] packet in
+            guard let self else { return }
+            self.queue.async {
+                if let marker = packet.first {
+                    if marker == AACAudioEncoder.configMarker {
+                        self.audioDebugSentConfigCount += 1
+                        print("[AudioDebug][mac] sent config #\(self.audioDebugSentConfigCount)")
+                    } else if marker == AACAudioEncoder.frameMarker {
+                        self.audioDebugSentFrameCount += 1
+                        if self.audioDebugSentFrameCount % 120 == 0 {
+                            print("[AudioDebug][mac] sent frames=\(self.audioDebugSentFrameCount)")
+                        }
+                    }
+                }
+                let pairedClientIDs = self.clients.compactMap { id, context in
+                    context.token == nil ? nil : id
+                }
+                for id in pairedClientIDs {
+                    self.sendBinaryFrame(packet, to: id)
+                }
+            }
+        }
+
+        Task {
+            await screenCaptureProvider.setAudioSampleHandler { [weak self] sampleBuffer in
+                self?.handleAudioSampleBuffer(sampleBuffer)
+            }
+            await screenCaptureProvider.setAudioCaptureSource(self.selectedAudioCaptureSource)
         }
 
         thermalObserver = NotificationCenter.default.addObserver(
@@ -146,6 +180,7 @@ final class MacWebSocketServer: @unchecked Sendable {
                 await self?.screenCaptureProvider.stopCapture()
             }
             self.h264Encoder.stop()
+            self.aacEncoder.stop()
             self.publishClients()
         }
     }
@@ -231,6 +266,8 @@ final class MacWebSocketServer: @unchecked Sendable {
             handleStreamConfig(message, from: id)
         case .streamResync:
             handleStreamResync(message, from: id)
+        case .audioConfig:
+            handleAudioConfig(message, from: id)
         case .trustControl:
             handleTrustControl(message, from: id)
         case .ping:
@@ -365,6 +402,22 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         h264Encoder.requestStreamResync()
+        aacEncoder.requestStreamResync()
+    }
+
+    private func handleAudioConfig(_ message: RemoteMessage, from id: UUID) {
+        let isAuthorized = authorize(id: id, token: message.token)
+        guard isAuthorized else {
+            send(.error("Unauthorized session token"), to: id)
+            return
+        }
+
+        guard let source = message.audioSource else { return }
+        selectedAudioCaptureSource = source
+        Task {
+            await screenCaptureProvider.setAudioCaptureSource(source)
+        }
+        aacEncoder.requestStreamResync()
     }
 
     private func handleTrustControl(_ message: RemoteMessage, from id: UUID) {
@@ -587,6 +640,17 @@ final class MacWebSocketServer: @unchecked Sendable {
                 previewCaptureMaxWidth = 1920
                 h264Encoder.setQualityProfile(.ultra)
             }
+        }
+    }
+
+    private func handleAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let hasPairedClients = self.clients.contains { _, context in
+                context.token != nil
+            }
+            guard hasPairedClients else { return }
+            self.aacEncoder.encode(sampleBuffer: sampleBuffer.value)
         }
     }
 

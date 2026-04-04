@@ -181,7 +181,9 @@ private struct MacCenteredLogoOverlay: View {
     @ObservedObject var viewModel: IOSKeyboardViewModel
     @AppStorage("preview.zoom.level") private var previewZoomLevel: Double = 2.5
     @AppStorage("preview.quality.mode") private var previewQualityModeRaw: String = PreviewQualityMode.ultra.rawValue
+    @AppStorage("audio.capture.source") private var audioCaptureSourceRaw: String = AudioCaptureSource.systemOutput.rawValue
     @AppStorage("preview.virtual.overscan.enabled") private var isVirtualOverscanEnabled = false
+    @AppStorage("layout.immersive.landscape.enabled") private var isImmersiveLandscapeModeEnabled = false
     @AppStorage("input.eye.cursor.enabled") private var isEyeCursorEnabled = false
     @AppStorage("feature.eye.cursor.experimental.enabled") private var isEyeCursorExperimentalEnabled = false
     @State private var isTypingCaptureActive = false
@@ -207,7 +209,6 @@ private struct MacCenteredLogoOverlay: View {
     @State private var isStatsSectionVisible = false
     @State private var isKeyboardSectionVisible = false
     @State private var isTrackpadSectionVisible = false
-    @State private var isImmersiveLandscapeModeEnabled = false
     @State private var previewResyncTask: Task<Void, Never>?
     @State private var lastPreviewResyncAt: Date?
     @State private var previewSurfaceVersion = 0
@@ -234,7 +235,7 @@ private struct MacCenteredLogoOverlay: View {
                         let previewHeight = previewWidth / previewAspect
 
                         if isImmersiveLandscapeModeEnabled {
-                            ZStack(alignment: .topTrailing) {
+                            ZStack {
                                 ZStack {
                                     fixedScreenPreview
                                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -251,6 +252,7 @@ private struct MacCenteredLogoOverlay: View {
                                             viewModel.scrollMouse(deltaX: deltaX, deltaY: deltaY)
                                         },
                                         onClick: { button, action in
+                                            guard isTypingCaptureActive == false else { return }
                                             viewModel.clickMouse(button: button, action: action)
                                         },
                                         onFourFingerSwipe: { direction in
@@ -284,20 +286,73 @@ private struct MacCenteredLogoOverlay: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .padding(.vertical, 10)
 
-                                Button {
-                                    focusedField = nil
-                                    dismissTypingCapture()
-                                    isConfigSheetPresented = true
-                                } label: {
-                                    Image(systemName: "slider.horizontal.3")
-                                        .font(.headline.weight(.semibold))
-                                        .frame(width: 42, height: 42)
-                                        .background(.ultraThinMaterial, in: Circle())
+                                HiddenTextInputView(
+                                    isActive: isTypingCaptureActive,
+                                    activeModifiers: viewModel.activeModifiers,
+                                    onCharacter: { character in
+                                        viewModel.handleCharacter(character)
+                                    },
+                                    onBackspace: {
+                                        viewModel.handleBackspace()
+                                    },
+                                    onReturn: {
+                                        viewModel.handleReturn()
+                                    },
+                                    onToggleModifier: { modifier in
+                                        viewModel.toggleModifier(modifier)
+                                    },
+                                    onSpecialKey: { key in
+                                        viewModel.sendNamedKey(key)
+                                    }
+                                )
+                                .frame(width: 1, height: 1)
+                                .opacity(0.01)
+                                .allowsHitTesting(false)
+
+                                VStack {
+                                    HStack {
+                                        Spacer(minLength: 0)
+                                        Button {
+                                            focusedField = nil
+                                            dismissTypingCapture()
+                                            isConfigSheetPresented = true
+                                        } label: {
+                                            Image(systemName: "slider.horizontal.3")
+                                                .font(.headline.weight(.semibold))
+                                                .frame(width: 42, height: 42)
+                                                .background(.ultraThinMaterial, in: Circle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(.top, topInset + 8)
+                                        .padding(.trailing, 12)
+                                    }
+
+                                    Spacer(minLength: 0)
+
+                                    HStack {
+                                        Spacer(minLength: 0)
+                                        Button {
+                                            focusedField = nil
+                                            isTypingCaptureActive = true
+                                        } label: {
+                                            Image(systemName: "keyboard")
+                                                .font(.headline.weight(.semibold))
+                                                .frame(width: 50, height: 50)
+                                                .background(.ultraThinMaterial, in: Circle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(.trailing, 14)
+                                        .padding(.bottom, max(geometry.safeAreaInsets.bottom, 12))
+                                    }
                                 }
-                                .buttonStyle(.plain)
-                                .padding(.top, topInset + 8)
-                                .padding(.trailing, 12)
                             }
+                            .simultaneousGesture(
+                                TapGesture().onEnded {
+                                    if isTypingCaptureActive {
+                                        dismissTypingCapture()
+                                    }
+                                }
+                            )
                             .opacity(isConnectedContentVisible ? connectedScreenOpacity : 0)
                             .allowsHitTesting(isConnectedContentVisible && connectedScreenOpacity > 0.01)
                         } else {
@@ -390,6 +445,9 @@ private struct MacCenteredLogoOverlay: View {
             updateEyeCursorState()
             if let storedQuality = PreviewQualityMode(rawValue: previewQualityModeRaw) {
                 viewModel.setPreviewQualityMode(storedQuality)
+            }
+            if let storedAudioSource = AudioCaptureSource(rawValue: audioCaptureSourceRaw) {
+                viewModel.setAudioCaptureSource(storedAudioSource)
             }
             if viewModel.isPaired {
                 beginConnectSequence()
@@ -956,6 +1014,18 @@ private struct MacCenteredLogoOverlay: View {
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
 
             HStack(spacing: 12) {
+                Text("Virtual overscan")
+                    .font(.footnote.weight(.semibold))
+                Spacer(minLength: 0)
+                Toggle("", isOn: $isVirtualOverscanEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .padding(.horizontal, Layout.fieldHorizontalPadding)
+            .padding(.vertical, Layout.fieldVerticalPadding)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+
+            HStack(spacing: 12) {
                 Text("Experimental eye tracking")
                     .font(.footnote.weight(.semibold))
                 Spacer(minLength: 0)
@@ -1009,17 +1079,29 @@ private struct MacCenteredLogoOverlay: View {
             .padding(.vertical, Layout.fieldVerticalPadding)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
 
-            HStack(spacing: 12) {
-                Text("Virtual overscan")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Audio source")
                     .font(.footnote.weight(.semibold))
-                Spacer(minLength: 0)
-                Toggle("", isOn: $isVirtualOverscanEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
+
+                Picker("Audio Source", selection: Binding(
+                    get: { viewModel.audioCaptureSource },
+                    set: { newValue in
+                        dismissTypingCapture()
+                        audioCaptureSourceRaw = newValue.rawValue
+                        viewModel.setAudioCaptureSource(newValue)
+                    }
+                )) {
+                    Text("System").tag(AudioCaptureSource.systemOutput)
+                    Text("Mic").tag(AudioCaptureSource.microphone)
+                    Text("System + Mic").tag(AudioCaptureSource.systemAndMicrophone)
+                }
+                .pickerStyle(.menu)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Layout.fieldHorizontalPadding)
             .padding(.vertical, Layout.fieldVerticalPadding)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .simultaneousGesture(

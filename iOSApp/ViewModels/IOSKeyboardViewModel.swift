@@ -11,6 +11,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     @Published var connectionLabel = "Disconnected"
     @Published var previewQualityMode: PreviewQualityMode = .ultra
     @Published var isThermalQualityOverrideActive = false
+    @Published var audioCaptureSource: AudioCaptureSource = .systemOutput
 
     let screenPreview = ScreenPreviewState()
 
@@ -55,6 +56,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     private let browser = BonjourServiceBrowser()
     private let client = IOSWebSocketClient()
     private let h264Decoder = H264FrameDecoder()
+    private let aacAudioPlayer = AACAudioPlayer()
     private var cancellables: Set<AnyCancellable> = []
     private var previewZoomLevel: Double = 1.0
     private var isUserInitiatedDisconnecting = false
@@ -97,10 +99,12 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.isUserInitiatedDisconnecting = false
                     self.isThermalQualityOverrideActive = false
                     self.screenPreview.reset()
+                    self.aacAudioPlayer.stop()
                 case .connecting:
                     self.isUserInitiatedDisconnecting = false
                     self.suppressExpectedDisconnectErrors = false
                     self.connectionLabel = "Connecting…"
+                    self.aacAudioPlayer.stop()
                 case .connected:
                     self.isUserInitiatedDisconnecting = false
                     self.suppressExpectedDisconnectErrors = false
@@ -111,6 +115,8 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.connectionLabel = "Paired and ready"
                     self.hasTrustedSession = true
                     self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
+                    self.client.sendAudioConfig(source: self.audioCaptureSource)
+                    self.aacAudioPlayer.start()
                 case let .failed(reason):
                     let normalizedReason = reason.localizedLowercase
                     if self.suppressExpectedDisconnectErrors,
@@ -124,6 +130,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.lastError = reason
                     self.isThermalQualityOverrideActive = false
                     self.screenPreview.reset()
+                    self.aacAudioPlayer.stop()
                     if self.hasTrustedSession,
                        self.pairingCode.isEmpty,
                        reason.localizedCaseInsensitiveContains("invalid pairing code") {
@@ -165,6 +172,14 @@ final class IOSKeyboardViewModel: ObservableObject {
 
         client.onH264Frame = { [weak self] frameData in
             self?.h264Decoder.decode(framePayload: frameData)
+        }
+
+        client.onAACConfig = { [weak self] configPayload in
+            self?.aacAudioPlayer.configure(with: configPayload)
+        }
+
+        client.onAACFrame = { [weak self] framePayload in
+            self?.aacAudioPlayer.enqueueFrame(framePayload)
         }
 
         client.onScreenFrame = { [weak self] frameData in
@@ -289,6 +304,12 @@ final class IOSKeyboardViewModel: ObservableObject {
         guard abs(previewZoomLevel - clamped) > 0.01 else { return }
         previewZoomLevel = clamped
         client.sendStreamConfig(qualityMode: previewQualityMode, previewZoomLevel: previewZoomLevel)
+    }
+
+    func setAudioCaptureSource(_ source: AudioCaptureSource) {
+        guard audioCaptureSource != source else { return }
+        audioCaptureSource = source
+        client.sendAudioConfig(source: source)
     }
 
     func requestStreamResync() {

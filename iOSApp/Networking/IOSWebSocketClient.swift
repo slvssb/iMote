@@ -19,6 +19,8 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onCursorPosition: ((Double, Double) -> Void)?
     var onH264Config: ((Data) -> Void)?
     var onH264Frame: ((Data) -> Void)?
+    var onAACConfig: ((Data) -> Void)?
+    var onAACFrame: ((Data) -> Void)?
     var onThermalOverrideChanged: ((Bool) -> Void)?
 
     private var session: URLSession!
@@ -31,10 +33,14 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private var shouldReconnect = false
     private let deviceIdentifier = UIDevice.current.identifierForVendor?.uuidString
     private var activeConnectionGeneration: UInt64 = 0
+    private var audioDebugReceivedConfigCount = 0
+    private var audioDebugReceivedFrameCount = 0
 
     private enum BinaryPacketMarker {
         static let h264Config: UInt8 = 0x10
         static let h264Frame: UInt8 = 0x11
+        static let aacConfig: UInt8 = 0x20
+        static let aacFrame: UInt8 = 0x21
     }
 
     override init() {
@@ -113,6 +119,10 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
 
     func sendForgetCurrentDeviceTrust() {
         sendMessage(RemoteMessage.trustControl(action: .forgetCurrentDevice, token: pairedToken, deviceID: deviceIdentifier))
+    }
+
+    func sendAudioConfig(source: AudioCaptureSource) {
+        sendMessage(RemoteMessage.audioConfig(source: source, token: pairedToken))
     }
 
     private func sendPairing(code: String) {
@@ -223,6 +233,18 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             return true
         case BinaryPacketMarker.h264Frame:
             onH264Frame?(Data(payload))
+            return true
+        case BinaryPacketMarker.aacConfig:
+            audioDebugReceivedConfigCount += 1
+            print("[AudioDebug][ios-client] received config #\(audioDebugReceivedConfigCount)")
+            onAACConfig?(Data(payload))
+            return true
+        case BinaryPacketMarker.aacFrame:
+            audioDebugReceivedFrameCount += 1
+            if audioDebugReceivedFrameCount % 120 == 0 {
+                print("[AudioDebug][ios-client] received frames=\(audioDebugReceivedFrameCount)")
+            }
+            onAACFrame?(Data(payload))
             return true
         default:
             return false
