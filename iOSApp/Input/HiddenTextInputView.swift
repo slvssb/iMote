@@ -228,6 +228,7 @@ struct HiddenTextInputView: UIViewRepresentable {
             refocus()
         }
         accessory.updateModifierState(activeModifiers)
+        accessory.updateLiveInput(field.text ?? "")
 
         field.prewarmKeyboardIfNeeded()
 
@@ -237,6 +238,7 @@ struct HiddenTextInputView: UIViewRepresentable {
     func updateUIView(_ uiView: BackspaceTextView, context: Context) {
         context.coordinator.parent = self
         uiView.keyboardToolbar?.updateModifierState(activeModifiers)
+        uiView.keyboardToolbar?.updateLiveInput(uiView.text ?? "")
         uiView.lockFocus = isActive
 
         if isActive && uiView.isFirstResponder == false {
@@ -299,11 +301,13 @@ final class BackspaceTextView: UITextView {
         let current = text ?? ""
         text = current + value
         moveCursorToEnd()
+        keyboardToolbar?.updateLiveInput(text ?? "")
     }
 
     func setPreviewText(_ value: String) {
         text = value
         moveCursorToEnd()
+        keyboardToolbar?.updateLiveInput(value)
     }
 
     func removeLastPreviewCharacter() {
@@ -311,12 +315,14 @@ final class BackspaceTextView: UITextView {
         current.removeLast()
         text = current
         moveCursorToEnd()
+        keyboardToolbar?.updateLiveInput(current)
     }
 
     func clearPreview() {
         text = ""
         moveCursorToEnd()
         clearWorkItem?.cancel()
+        keyboardToolbar?.updateLiveInput("")
     }
 
     func scheduleAutoClear() {
@@ -348,7 +354,8 @@ final class KeyboardAccessoryView: UIInputView {
     var onSpecialKeyTapped: ((KeyboardNamedKey) -> Void)?
 
     private var modifierButtons: [RemoteModifier: UIButton] = [:]
-    private let accessoryHeight: CGFloat = 96
+    private let accessoryHeight: CGFloat = 132
+    private let liveInputLabel = UILabel()
 
     override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: accessoryHeight)
@@ -378,6 +385,10 @@ final class KeyboardAccessoryView: UIInputView {
                 active: isActive
             )
         }
+    }
+
+    func updateLiveInput(_ value: String) {
+        liveInputLabel.text = value
     }
 
     private func setup() {
@@ -412,6 +423,27 @@ final class KeyboardAccessoryView: UIInputView {
         modifierRow.alignment = .fill
         modifierRow.distribution = .fillEqually
         modifierRow.spacing = 6
+
+        let liveInputContainer = UIView()
+        liveInputContainer.backgroundColor = UIColor(white: 0.16, alpha: 0.9)
+        liveInputContainer.layer.cornerRadius = 8
+        liveInputContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        liveInputLabel.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
+        liveInputLabel.textColor = .white
+        liveInputLabel.textAlignment = .left
+        liveInputLabel.lineBreakMode = .byTruncatingHead
+        liveInputLabel.numberOfLines = 1
+        liveInputLabel.translatesAutoresizingMaskIntoConstraints = false
+        liveInputContainer.addSubview(liveInputLabel)
+
+        NSLayoutConstraint.activate([
+            liveInputContainer.heightAnchor.constraint(equalToConstant: 30),
+            liveInputLabel.leadingAnchor.constraint(equalTo: liveInputContainer.leadingAnchor, constant: 10),
+            liveInputLabel.trailingAnchor.constraint(equalTo: liveInputContainer.trailingAnchor, constant: -10),
+            liveInputLabel.topAnchor.constraint(equalTo: liveInputContainer.topAnchor, constant: 6),
+            liveInputLabel.bottomAnchor.constraint(equalTo: liveInputContainer.bottomAnchor, constant: -6)
+        ])
 
         let modifiers: [(RemoteModifier, String)] = [
             (.command, "⌘"),
@@ -455,6 +487,7 @@ final class KeyboardAccessoryView: UIInputView {
             specialRow.addArrangedSubview(button)
         }
 
+        root.addArrangedSubview(liveInputContainer)
         root.addArrangedSubview(modifierRow)
         root.addArrangedSubview(specialRow)
     }
