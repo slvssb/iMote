@@ -177,6 +177,7 @@ private struct MacCenteredLogoOverlay: View {
     }
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     @ObservedObject var viewModel: IOSKeyboardViewModel
     @AppStorage("preview.zoom.level") private var previewZoomLevel: Double = 2.5
@@ -440,7 +441,7 @@ private struct MacCenteredLogoOverlay: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .onAppear {
-            IMoteOrientationController.setImmersiveModeEnabled(isImmersiveLandscapeModeEnabled)
+            applyOrientationPolicy()
             previewZoomLevel = clampedZoom(previewZoomLevel)
             viewModel.setPreviewZoomLevel(previewZoomLevel)
             eyeCursorController.onMove = { deltaX, deltaY in
@@ -477,7 +478,6 @@ private struct MacCenteredLogoOverlay: View {
             updateEyeCursorState()
         }
         .onChange(of: isImmersiveLandscapeModeEnabled) { _, isEnabled in
-            IMoteOrientationController.setImmersiveModeEnabled(isEnabled)
             guard showConnectedLayout || isDisconnectTransitionActive else { return }
             // Keep preview visible when switching layout modes mid-session.
             if isEnabled || viewModel.screenPreview.hasFrame {
@@ -485,6 +485,16 @@ private struct MacCenteredLogoOverlay: View {
                 isLivePreviewVisible = true
             }
             forcePreviewPipelineResync(reason: "immersiveToggle")
+        }
+        .onChange(of: shouldUseImmersiveLandscapeOrientation) { _, _ in
+            applyOrientationPolicy()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            applyOrientationPolicy()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            applyOrientationPolicy()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             handleOrientationDidChange()
@@ -815,6 +825,16 @@ private struct MacCenteredLogoOverlay: View {
             || isTrackpadSectionVisible
             || isStartupOverlayVisible
             || isDisconnectPreviewOverlayVisible
+    }
+
+    private var shouldUseImmersiveLandscapeOrientation: Bool {
+        isImmersiveLandscapeModeEnabled
+            && viewModel.isPaired
+            && (showConnectedLayout || isDisconnectTransitionActive)
+    }
+
+    private func applyOrientationPolicy() {
+        IMoteOrientationController.setImmersiveModeEnabled(shouldUseImmersiveLandscapeOrientation)
     }
 
     private func beginConnectSequence() {

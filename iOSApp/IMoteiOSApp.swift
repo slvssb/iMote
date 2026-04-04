@@ -12,12 +12,21 @@ final class IMoteAppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
+@MainActor
 enum IMoteOrientationController {
     static func setImmersiveModeEnabled(_ isEnabled: Bool) {
         let mask: UIInterfaceOrientationMask = isEnabled ? [.landscapeLeft, .landscapeRight] : .portrait
         IMoteAppDelegate.orientationLock = mask
 
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else {
+            return
+        }
+
+        for window in scene.windows {
+            window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+
         if #available(iOS 16.0, *) {
             let preferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: mask)
             scene.requestGeometryUpdate(preferences) { _ in }
