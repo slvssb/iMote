@@ -299,6 +299,9 @@ private struct MacCenteredLogoOverlay: View {
                                     onReturn: {
                                         viewModel.handleReturn()
                                     },
+                                    onModifierTap: { modifier in
+                                        viewModel.sendModifierTap(modifier)
+                                    },
                                     onToggleModifier: { modifier in
                                         viewModel.toggleModifier(modifier)
                                     },
@@ -1297,6 +1300,9 @@ private struct MacCenteredLogoOverlay: View {
                     },
                     onReturn: {
                         viewModel.handleReturn()
+                    },
+                    onModifierTap: { modifier in
+                        viewModel.sendModifierTap(modifier)
                     },
                     onToggleModifier: { modifier in
                         viewModel.toggleModifier(modifier)

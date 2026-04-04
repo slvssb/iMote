@@ -344,6 +344,10 @@ final class IOSKeyboardViewModel: ObservableObject {
         activeModifiers.removeAll()
     }
 
+    func sendModifierTap(_ modifier: RemoteModifier) {
+        client.sendKey(modifier.rawValue, modifiers: [], action: .tap)
+    }
+
     func handleCharacter(_ character: Character) {
         let value = String(character)
         let modifiers = Array(activeModifiers)

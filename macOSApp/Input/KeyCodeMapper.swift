@@ -13,6 +13,10 @@ struct KeyCodeMapper {
         ]
 
         let aliases: [(String, CGKeyCode)] = [
+            (RemoteModifier.command.rawValue, 55),
+            (RemoteModifier.option.rawValue, 58),
+            (RemoteModifier.shift.rawValue, 56),
+            (RemoteModifier.control.rawValue, 59),
             (KeyboardNamedKey.tab.rawValue, 48),
             (KeyboardNamedKey.space.rawValue, 49),
             (KeyboardNamedKey.backspace.rawValue, 51),

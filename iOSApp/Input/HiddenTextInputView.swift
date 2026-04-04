@@ -8,6 +8,7 @@ struct HiddenTextInputView: UIViewRepresentable {
     var onCharacter: (Character) -> Void
     var onBackspace: () -> Void
     var onReturn: () -> Void
+    var onModifierTap: (RemoteModifier) -> Void
     var onToggleModifier: (RemoteModifier) -> Void
     var onSpecialKey: (KeyboardNamedKey) -> Void
 
@@ -15,6 +16,7 @@ struct HiddenTextInputView: UIViewRepresentable {
         var parent: HiddenTextInputView
         private var lastAcceptedEditSignature: String?
         private var lastAcceptedEditTime: CFTimeInterval = 0
+        private var holdActivatedModifiers: Set<RemoteModifier> = []
 
         init(parent: HiddenTextInputView) {
             self.parent = parent
@@ -161,6 +163,18 @@ struct HiddenTextInputView: UIViewRepresentable {
         private func moveCursorToEnd(_ textView: UITextView) {
             (textView as? BackspaceTextView)?.moveCursorToEnd()
         }
+
+        func beginModifierHold(_ modifier: RemoteModifier) {
+            guard parent.activeModifiers.contains(modifier) == false else { return }
+            holdActivatedModifiers.insert(modifier)
+            parent.onToggleModifier(modifier)
+        }
+
+        func endModifierHold(_ modifier: RemoteModifier) {
+            guard holdActivatedModifiers.contains(modifier) else { return }
+            holdActivatedModifiers.remove(modifier)
+            parent.onToggleModifier(modifier)
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -205,7 +219,15 @@ struct HiddenTextInputView: UIViewRepresentable {
         field.isScrollEnabled = true
 
         accessory.onModifierTapped = { modifier in
-            context.coordinator.parent.onToggleModifier(modifier)
+            context.coordinator.parent.onModifierTap(modifier)
+            refocus()
+        }
+        accessory.onModifierHoldChanged = { modifier, isHeld in
+            if isHeld {
+                context.coordinator.beginModifierHold(modifier)
+            } else {
+                context.coordinator.endModifierHold(modifier)
+            }
             refocus()
         }
         accessory.onSpecialKeyTapped = { key in
@@ -351,9 +373,12 @@ final class BackspaceTextView: UITextView {
 
 final class KeyboardAccessoryView: UIInputView {
     var onModifierTapped: ((RemoteModifier) -> Void)?
+    var onModifierHoldChanged: ((RemoteModifier, Bool) -> Void)?
     var onSpecialKeyTapped: ((KeyboardNamedKey) -> Void)?
 
     private var modifierButtons: [RemoteModifier: UIButton] = [:]
+    private var modifierTagMap: [Int: RemoteModifier] = [:]
+    private var suppressTapModifiers: Set<RemoteModifier> = []
     private let accessoryHeight: CGFloat = 132
     private let liveInputLabel = UILabel()
 
@@ -452,12 +477,24 @@ final class KeyboardAccessoryView: UIInputView {
             (.control, "⌃")
         ]
 
-        for (modifier, title) in modifiers {
+        for (index, entry) in modifiers.enumerated() {
+            let (modifier, title) = entry
             let button = UIButton(type: .system)
+            button.tag = index
             button.configuration = modifierConfiguration(title: title, active: false)
             button.addAction(UIAction { [weak self] _ in
-                self?.onModifierTapped?(modifier)
+                guard let self else { return }
+                if self.suppressTapModifiers.contains(modifier) {
+                    self.suppressTapModifiers.remove(modifier)
+                    return
+                }
+                self.onModifierTapped?(modifier)
             }, for: .touchUpInside)
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleModifierLongPress(_:)))
+            longPress.minimumPressDuration = 0.35
+            longPress.cancelsTouchesInView = false
+            button.addGestureRecognizer(longPress)
+            modifierTagMap[index] = modifier
             modifierButtons[modifier] = button
             modifierRow.addArrangedSubview(button)
         }
@@ -490,6 +527,29 @@ final class KeyboardAccessoryView: UIInputView {
         root.addArrangedSubview(liveInputContainer)
         root.addArrangedSubview(modifierRow)
         root.addArrangedSubview(specialRow)
+    }
+
+    @objc
+    private func handleModifierLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard
+            let button = recognizer.view as? UIButton,
+            let modifier = modifierTagMap[button.tag]
+        else {
+            return
+        }
+
+        switch recognizer.state {
+        case .began:
+            suppressTapModifiers.insert(modifier)
+            onModifierHoldChanged?(modifier, true)
+        case .ended, .cancelled, .failed:
+            onModifierHoldChanged?(modifier, false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.suppressTapModifiers.remove(modifier)
+            }
+        default:
+            break
+        }
     }
 
     private func modifierConfiguration(title: String, active: Bool) -> UIButton.Configuration {

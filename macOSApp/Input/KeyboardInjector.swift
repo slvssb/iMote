@@ -28,7 +28,7 @@ final class KeyboardInjector {
     private var lastMouseTapLocation: CGPoint = .zero
     private var lastMouseTapButton: MouseButton?
     private var lastMouseTapClickCount: Int64 = 0
-    private var isSystemEventsControlArrowAuthorized = true
+    private var pressedMouseButtons: Set<MouseButton> = []
 
     init(permissionManager: AccessibilityPermissionManager) {
         self.permissionManager = permissionManager
@@ -60,10 +60,6 @@ final class KeyboardInjector {
         case .up:
             try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
         case .tap:
-            if shouldUseControlArrowShortcutPath(keyCode: keyCode, modifiers: modifiers) {
-                try postControlArrowShortcutTap(keyCode: keyCode)
-                return
-            }
             if modifiers.isEmpty {
                 try postKeyEvent(keyCode: keyCode, keyDown: true, flags: flags)
                 try postKeyEvent(keyCode: keyCode, keyDown: false, flags: flags)
@@ -87,11 +83,13 @@ final class KeyboardInjector {
         let adjustedDelta = adjustedEdgeAwareDelta(from: current, deltaX: deltaX, deltaY: deltaY)
         let rawNextPoint = CGPoint(x: current.x + adjustedDelta.x, y: current.y - adjustedDelta.y)
         let nextPoint = clampedPointToActiveDisplays(rawNextPoint)
+        let moveEventType = mouseMoveEventTypeForPressedButtons()
+        let moveButton = mouseButtonForPressedButtons()
         guard let moveEvent = CGEvent(
             mouseEventSource: eventSource,
-            mouseType: .mouseMoved,
+            mouseType: moveEventType,
             mouseCursorPosition: nextPoint,
-            mouseButton: .left
+            mouseButton: moveButton
         ) else {
             throw KeyboardInjectorError.eventBuildFailed
         }
@@ -131,8 +129,10 @@ final class KeyboardInjector {
 
         switch action {
         case .down:
+            pressedMouseButtons.insert(button)
             try postMouseEvent(source: eventSource, type: downType, point: cursor, button: mappedButton, clickState: 1)
         case .up:
+            pressedMouseButtons.remove(button)
             try postMouseEvent(source: eventSource, type: upType, point: cursor, button: mappedButton, clickState: 1)
         case .tap:
             let clickState = nextClickState(for: button, at: cursor)
@@ -164,7 +164,12 @@ final class KeyboardInjector {
         event.post(tap: .cghidEventTap)
     }
 
-    private func postKeyEvent(keyCode: CGKeyCode, keyDown: Bool, flags: CGEventFlags) throws {
+    private func postKeyEvent(
+        keyCode: CGKeyCode,
+        keyDown: Bool,
+        flags: CGEventFlags,
+        tap: CGEventTapLocation = .cgSessionEventTap
+    ) throws {
         guard
             let source = CGEventSource(stateID: .combinedSessionState),
             let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: keyDown)
@@ -172,66 +177,7 @@ final class KeyboardInjector {
             throw KeyboardInjectorError.eventBuildFailed
         }
         event.flags = flags
-        event.post(tap: .cgSessionEventTap)
-    }
-
-    private func shouldUseControlArrowShortcutPath(keyCode: CGKeyCode, modifiers: [RemoteModifier]) -> Bool {
-        guard modifiers.count == 1, modifiers.first == .control else { return false }
-        return (123...126).contains(Int(keyCode))
-    }
-
-    private func postControlArrowShortcutTap(keyCode: CGKeyCode) throws {
-        if performSystemEventsControlArrow(keyCode: keyCode) {
-            return
-        }
-
-        let controlFlags: CGEventFlags = [.maskControl]
-        guard
-            let source = CGEventSource(stateID: .combinedSessionState),
-            let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-            let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
-        else {
-            throw KeyboardInjectorError.eventBuildFailed
-        }
-
-        keyDown.flags = controlFlags
-        keyUp.flags = controlFlags
-
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
-    }
-
-    private func performSystemEventsControlArrow(keyCode: CGKeyCode) -> Bool {
-        guard isSystemEventsControlArrowAuthorized else { return false }
-        guard [123, 124, 125, 126].contains(Int(keyCode)) else { return false }
-        let script = """
-        tell application "System Events"
-            key code \(keyCode) using control down
-        end tell
-        """
-
-        let execution: (result: Bool, scriptError: NSDictionary?)
-        if Thread.isMainThread {
-            var scriptError: NSDictionary?
-            guard let appleScript = NSAppleScript(source: script) else { return false }
-            _ = appleScript.executeAndReturnError(&scriptError)
-            execution = (scriptError == nil, scriptError)
-        } else {
-            execution = DispatchQueue.main.sync {
-                var scriptError: NSDictionary?
-                guard let appleScript = NSAppleScript(source: script) else { return (false, nil) }
-                _ = appleScript.executeAndReturnError(&scriptError)
-                return (scriptError == nil, scriptError)
-            }
-        }
-
-        if let scriptError = execution.scriptError {
-            let errorNumber = (scriptError["NSAppleScriptErrorNumber"] as? NSNumber)?.intValue
-            if errorNumber == -1743 {
-                isSystemEventsControlArrowAuthorized = false
-            }
-        }
-        return execution.result
+        event.post(tap: tap)
     }
 
     private func postModifiedTap(keyCode: CGKeyCode, modifiers: [RemoteModifier], flags: CGEventFlags) throws {
@@ -306,6 +252,32 @@ final class KeyboardInjector {
         lastMouseTapLocation = point
         lastMouseTapTime = now
         return lastMouseTapClickCount
+    }
+
+    private func mouseMoveEventTypeForPressedButtons() -> CGEventType {
+        if pressedMouseButtons.contains(.left) {
+            return .leftMouseDragged
+        }
+        if pressedMouseButtons.contains(.right) {
+            return .rightMouseDragged
+        }
+        if pressedMouseButtons.contains(.center) {
+            return .otherMouseDragged
+        }
+        return .mouseMoved
+    }
+
+    private func mouseButtonForPressedButtons() -> CGMouseButton {
+        if pressedMouseButtons.contains(.left) {
+            return .left
+        }
+        if pressedMouseButtons.contains(.right) {
+            return .right
+        }
+        if pressedMouseButtons.contains(.center) {
+            return .center
+        }
+        return .left
     }
 
     private func normalizedScrollDelta(_ value: Double) -> Int32 {

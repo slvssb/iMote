@@ -54,6 +54,8 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
     var isVisualChromeEnabled = true
 
     private var isThreeFingerDragging = false
+    private var isLeftLongPressActive = false
+    private var isRightLongPressActive = false
     private let leftClickFeedback = UIImpactFeedbackGenerator(style: .soft)
     private let rightClickFeedback = UIImpactFeedbackGenerator(style: .medium)
     private let centerClickFeedback = UIImpactFeedbackGenerator(style: .rigid)
@@ -150,10 +152,27 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         threeFingerTap.delegate = self
         threeFingerTap.cancelsTouchesInView = false
 
+        let oneFingerLongPress = UILongPressGestureRecognizer(target: self, action: #selector(handleOneFingerLongPress(_:)))
+        oneFingerLongPress.minimumPressDuration = 0.35
+        oneFingerLongPress.allowableMovement = 24
+        oneFingerLongPress.numberOfTouchesRequired = 1
+        oneFingerLongPress.delegate = self
+        oneFingerLongPress.cancelsTouchesInView = false
+
+        let twoFingerLongPress = UILongPressGestureRecognizer(target: self, action: #selector(handleTwoFingerLongPress(_:)))
+        twoFingerLongPress.minimumPressDuration = 0.35
+        twoFingerLongPress.allowableMovement = 24
+        twoFingerLongPress.numberOfTouchesRequired = 2
+        twoFingerLongPress.delegate = self
+        twoFingerLongPress.cancelsTouchesInView = false
+
         singleTap.require(toFail: doubleTap)
+        singleTap.require(toFail: oneFingerLongPress)
         singleTap.require(toFail: oneFingerPan)
         doubleTap.require(toFail: oneFingerPan)
+        doubleTap.require(toFail: oneFingerLongPress)
         twoFingerTap.require(toFail: twoFingerPan)
+        twoFingerTap.require(toFail: twoFingerLongPress)
         threeFingerTap.require(toFail: threeFingerPan)
 
         addGestureRecognizer(oneFingerPan)
@@ -167,6 +186,8 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         addGestureRecognizer(doubleTap)
         addGestureRecognizer(twoFingerTap)
         addGestureRecognizer(threeFingerTap)
+        addGestureRecognizer(oneFingerLongPress)
+        addGestureRecognizer(twoFingerLongPress)
     }
 
     @objc private func handleOneFingerPan(_ recognizer: UIPanGestureRecognizer) {
@@ -263,6 +284,40 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         if recognizer.state == .ended {
             triggerClickHaptic(for: .center)
             onClick?(.center, .tap)
+        }
+    }
+
+    @objc private func handleOneFingerLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            guard isLeftLongPressActive == false else { return }
+            isLeftLongPressActive = true
+            triggerClickHaptic(for: .left)
+            onClick?(.left, .down)
+        case .ended, .cancelled, .failed:
+            guard isLeftLongPressActive else { return }
+            isLeftLongPressActive = false
+            triggerClickHaptic(for: .left)
+            onClick?(.left, .up)
+        default:
+            break
+        }
+    }
+
+    @objc private func handleTwoFingerLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            guard isRightLongPressActive == false else { return }
+            isRightLongPressActive = true
+            triggerClickHaptic(for: .right)
+            onClick?(.right, .down)
+        case .ended, .cancelled, .failed:
+            guard isRightLongPressActive else { return }
+            isRightLongPressActive = false
+            triggerClickHaptic(for: .right)
+            onClick?(.right, .up)
+        default:
+            break
         }
     }
 
@@ -480,6 +535,9 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        false
+        let leftHoldWithOneFingerPan =
+            (gestureRecognizer is UILongPressGestureRecognizer && (gestureRecognizer as? UILongPressGestureRecognizer)?.numberOfTouchesRequired == 1 && otherGestureRecognizer is UIPanGestureRecognizer && (otherGestureRecognizer as? UIPanGestureRecognizer)?.maximumNumberOfTouches == 1) ||
+            (otherGestureRecognizer is UILongPressGestureRecognizer && (otherGestureRecognizer as? UILongPressGestureRecognizer)?.numberOfTouchesRequired == 1 && gestureRecognizer is UIPanGestureRecognizer && (gestureRecognizer as? UIPanGestureRecognizer)?.maximumNumberOfTouches == 1)
+        return leftHoldWithOneFingerPan
     }
 }
