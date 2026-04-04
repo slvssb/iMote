@@ -196,6 +196,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static func error(_ reason: String) -> RemoteMessage {
         RemoteMessage(type: .error, reason: reason)
     }
+
 }
 
 public enum RemoteProtocolCodec {

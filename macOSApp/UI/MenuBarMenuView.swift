@@ -20,7 +20,6 @@ struct MenuBarMenuView: View {
         }
         .padding(14)
         .frame(width: 320)
-        .background(.ultraThinMaterial)
     }
 
     private var header: some View {

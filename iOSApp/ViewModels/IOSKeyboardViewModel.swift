@@ -175,11 +175,13 @@ final class IOSKeyboardViewModel: ObservableObject {
         }
 
         client.onAACConfig = { [weak self] configPayload in
-            self?.aacAudioPlayer.configure(with: configPayload)
+            guard let self else { return }
+            self.aacAudioPlayer.configure(with: configPayload)
         }
 
         client.onAACFrame = { [weak self] framePayload in
-            self?.aacAudioPlayer.enqueueFrame(framePayload)
+            guard let self else { return }
+            self.aacAudioPlayer.enqueueFrame(framePayload)
         }
 
         client.onScreenFrame = { [weak self] frameData in
@@ -196,6 +198,7 @@ final class IOSKeyboardViewModel: ObservableObject {
             guard let self else { return }
             self.isThermalQualityOverrideActive = isActive
         }
+
     }
 
     func start() {

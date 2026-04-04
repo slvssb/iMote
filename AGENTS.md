@@ -5,3 +5,5 @@ Ask me questions first. Don't apply the narrower interpretation of my request. A
 keep summary and explanations conversational, avoid file/line pointers unless I explicitly ask, and include concrete examples where they help.
 
 Never claim "matched" from style tokens alone. Confirm structure, behavior, and rendered output all align with the reference before declaring parity.
+
+Consider each attempt as your last attempt, as if you'll never get a chance to fix if something breaks. So give your 100% efforts & attention to bring it right.
