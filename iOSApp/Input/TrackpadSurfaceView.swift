@@ -140,6 +140,12 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         doubleTap.delegate = self
         doubleTap.cancelsTouchesInView = false
 
+        let tripleTap = UITapGestureRecognizer(target: self, action: #selector(handleTripleTap(_:)))
+        tripleTap.numberOfTouchesRequired = 1
+        tripleTap.numberOfTapsRequired = 3
+        tripleTap.delegate = self
+        tripleTap.cancelsTouchesInView = false
+
         let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap(_:)))
         twoFingerTap.numberOfTouchesRequired = 2
         twoFingerTap.numberOfTapsRequired = 1
@@ -167,10 +173,14 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         twoFingerLongPress.cancelsTouchesInView = false
 
         singleTap.require(toFail: doubleTap)
+        singleTap.require(toFail: tripleTap)
         singleTap.require(toFail: oneFingerLongPress)
         singleTap.require(toFail: oneFingerPan)
+        doubleTap.require(toFail: tripleTap)
         doubleTap.require(toFail: oneFingerPan)
         doubleTap.require(toFail: oneFingerLongPress)
+        tripleTap.require(toFail: oneFingerPan)
+        tripleTap.require(toFail: oneFingerLongPress)
         twoFingerTap.require(toFail: twoFingerPan)
         twoFingerTap.require(toFail: twoFingerLongPress)
         threeFingerTap.require(toFail: threeFingerPan)
@@ -184,6 +194,7 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
         addGestureRecognizer(fourFingerSwipeRight)
         addGestureRecognizer(singleTap)
         addGestureRecognizer(doubleTap)
+        addGestureRecognizer(tripleTap)
         addGestureRecognizer(twoFingerTap)
         addGestureRecognizer(threeFingerTap)
         addGestureRecognizer(oneFingerLongPress)
@@ -268,6 +279,15 @@ final class TrackpadGestureView: UIView, UIGestureRecognizerDelegate {
     @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended {
             triggerClickHaptic(for: .left)
+            onClick?(.left, .tap)
+            onClick?(.left, .tap)
+        }
+    }
+
+    @objc private func handleTripleTap(_ recognizer: UITapGestureRecognizer) {
+        if recognizer.state == .ended {
+            triggerClickHaptic(for: .left)
+            onClick?(.left, .tap)
             onClick?(.left, .tap)
             onClick?(.left, .tap)
         }
