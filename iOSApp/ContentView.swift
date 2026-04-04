@@ -597,9 +597,17 @@ private struct MacCenteredLogoOverlay: View {
                 }
 
                 VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                    Text("Mac Host")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: Layout.rowSpacing) {
+                        Text("Mac Host")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        if viewModel.connectionTargetMode == .manualAddress {
+                            Text("Remote mode requires the Mac host to be reachable at this IP and port.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, viewModel.connectionTargetMode == .manualAddress ? 12 : 0)
                     if viewModel.connectionTargetMode == .localDiscovery {
                         fieldShell {
                             Picker("Mac Host", selection: selectedServiceBinding) {
@@ -644,9 +652,6 @@ private struct MacCenteredLogoOverlay: View {
                                         }
                                     }
                             }
-                            Text("Remote mode requires the Mac host to be reachable at this IP and port.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -675,7 +680,7 @@ private struct MacCenteredLogoOverlay: View {
                                 .font(.system(.body, design: .monospaced))
                         }
                     }
-                } else {
+                } else if viewModel.connectionTargetMode == .localDiscovery {
                     HStack(spacing: 10) {
                         Image(systemName: "checkmark.shield")
                             .foregroundStyle(.green)
@@ -694,6 +699,7 @@ private struct MacCenteredLogoOverlay: View {
             }
             .buttonStyle(LiquidGlassButtonStyle(tint: .blue))
             .frame(maxWidth: .infinity)
+            .padding(.top, 8)
             .disabled(canConnect == false)
 
             if let error = viewModel.lastError {
@@ -702,7 +708,8 @@ private struct MacCenteredLogoOverlay: View {
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
-            } else if canConnect == false {
+            } else if canConnect == false,
+                      shouldShowConnectDisabledReason {
                 Text(connectDisabledReason)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1196,7 +1203,7 @@ private struct MacCenteredLogoOverlay: View {
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
 
             HStack(spacing: 12) {
-                Text("Experimental eye tracking")
+                Text("Experimental")
                     .font(.footnote.weight(.semibold))
                 Spacer(minLength: 0)
                 Toggle("", isOn: $isEyeCursorExperimentalEnabled)
@@ -1265,7 +1272,7 @@ private struct MacCenteredLogoOverlay: View {
                     Text("Mic").tag(AudioCaptureSource.microphone)
                     Text("System + Mic").tag(AudioCaptureSource.systemAndMicrophone)
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.segmented)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Layout.fieldHorizontalPadding)
@@ -1527,5 +1534,13 @@ private struct MacCenteredLogoOverlay: View {
             return "Enter the 6-digit pairing code."
         }
         return ""
+    }
+
+    private var shouldShowConnectDisabledReason: Bool {
+        if viewModel.connectionTargetMode == .manualAddress,
+           connectDisabledReason == "Enter the remote host or IP address." {
+            return false
+        }
+        return connectDisabledReason.isEmpty == false
     }
 }
