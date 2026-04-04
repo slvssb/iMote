@@ -51,7 +51,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var userSelectedQualityMode: PreviewQualityMode = .ultra
     private var effectiveQualityMode: PreviewQualityMode = .ultra
     private var requestedPreviewZoomLevel: Double = 1.0
-    private var selectedAudioCaptureSource: AudioCaptureSource = .systemOutput
+    private var selectedAudioCaptureSource: AudioCaptureSource = .off
     private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     private var isThermalOverrideActive = false
     private var previewCaptureMaxWidth: CGFloat = 1920
@@ -983,6 +983,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private func handleAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
         queue.async { [weak self] in
             guard let self else { return }
+            guard self.selectedAudioCaptureSource != .off else { return }
             let hasPairedClients = self.clients.contains { _, context in
                 context.token != nil
             }

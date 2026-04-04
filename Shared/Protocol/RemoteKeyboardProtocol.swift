@@ -51,6 +51,7 @@ public enum PreviewQualityMode: String, Codable, CaseIterable, Sendable {
 }
 
 public enum AudioCaptureSource: String, Codable, CaseIterable, Sendable {
+    case off
     case systemOutput
     case microphone
     case systemAndMicrophone

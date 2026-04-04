@@ -25,7 +25,7 @@ actor MacScreenCaptureProvider {
     private let outputQueue = DispatchQueue(label: "remote.keyboard.capture.output")
     private var latestPixelBuffer: CapturedPixelBuffer?
     private var activeMaxWidth: CGFloat = 0
-    private var audioCaptureSource: AudioCaptureSource = .systemOutput
+    private var audioCaptureSource: AudioCaptureSource = .off
     private var audioSampleHandler: ((CapturedAudioSampleBuffer) -> Void)?
 
     func makeFramePixelBuffer(maxWidth: CGFloat = 1920) async -> CapturedPixelBuffer? {
@@ -147,6 +147,9 @@ actor MacScreenCaptureProvider {
         config.excludesCurrentProcessAudio = true
 
         switch audioCaptureSource {
+        case .off:
+            config.capturesAudio = false
+            config.captureMicrophone = false
         case .systemOutput:
             config.capturesAudio = true
             config.captureMicrophone = false

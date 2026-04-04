@@ -39,7 +39,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     @Published var connectionLabel = "Disconnected"
     @Published var previewQualityMode: PreviewQualityMode = .ultra
     @Published var isThermalQualityOverrideActive = false
-    @Published var audioCaptureSource: AudioCaptureSource = .systemOutput
+    @Published var audioCaptureSource: AudioCaptureSource = .off
     @Published private(set) var permissionGatePhase: PermissionGatePhase = .idle
     @Published private(set) var hostPermissionState = HostPermissionChecklistState(
         accessibilityGranted: false,
@@ -166,7 +166,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.hasTrustedSession = true
                     self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
                     self.client.sendAudioConfig(source: self.audioCaptureSource)
-                    self.aacAudioPlayer.start()
+                    self.updateAudioPlaybackState()
                     self.beginPermissionGate()
                 case let .failed(reason):
                     let normalizedReason = reason.localizedLowercase
@@ -414,6 +414,15 @@ final class IOSKeyboardViewModel: ObservableObject {
         guard audioCaptureSource != source else { return }
         audioCaptureSource = source
         client.sendAudioConfig(source: source)
+        updateAudioPlaybackState()
+    }
+
+    private func updateAudioPlaybackState() {
+        if audioCaptureSource == .off {
+            aacAudioPlayer.stop()
+        } else if isPaired {
+            aacAudioPlayer.start()
+        }
     }
 
     func requestStreamResync() {

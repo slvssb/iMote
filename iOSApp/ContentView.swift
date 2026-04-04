@@ -182,7 +182,7 @@ private struct MacCenteredLogoOverlay: View {
     @ObservedObject var viewModel: IOSKeyboardViewModel
     @AppStorage("preview.zoom.level") private var previewZoomLevel: Double = 2.5
     @AppStorage("preview.quality.mode") private var previewQualityModeRaw: String = PreviewQualityMode.ultra.rawValue
-    @AppStorage("audio.capture.source") private var audioCaptureSourceRaw: String = AudioCaptureSource.systemOutput.rawValue
+    @AppStorage("audio.capture.source") private var audioCaptureSourceRaw: String = AudioCaptureSource.off.rawValue
     @AppStorage("preview.virtual.overscan.enabled") private var isVirtualOverscanEnabled = false
     @AppStorage("layout.immersive.landscape.enabled") private var isImmersiveLandscapeModeEnabled = false
     @AppStorage("input.eye.cursor.enabled") private var isEyeCursorEnabled = false
@@ -1268,6 +1268,7 @@ private struct MacCenteredLogoOverlay: View {
                         viewModel.setAudioCaptureSource(newValue)
                     }
                 )) {
+                    Text("Off").tag(AudioCaptureSource.off)
                     Text("System").tag(AudioCaptureSource.systemOutput)
                     Text("Mic").tag(AudioCaptureSource.microphone)
                     Text("System + Mic").tag(AudioCaptureSource.systemAndMicrophone)
