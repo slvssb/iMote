@@ -166,6 +166,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.hasTrustedSession = true
                     self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
                     self.client.sendAudioConfig(source: self.audioCaptureSource)
+                    self.client.sendStreamResync()
                     self.updateAudioPlaybackState()
                     self.beginPermissionGate()
                 case let .failed(reason):

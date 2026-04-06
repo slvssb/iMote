@@ -388,9 +388,6 @@ final class MacWebSocketServer: @unchecked Sendable {
             context.deviceName = message.deviceName
             context.secureSession = nil
             clients[id] = context
-            // Ensure newly paired/reconnected clients always receive a fresh
-            // config + keyframe sequence so decoder state can recover.
-            h264Encoder.requestStreamResync()
             send(.pairAck(success: true, token: token, reason: nil), to: id, deviceIDOverride: hostDeviceID)
             sendStreamStatus(to: id)
             sendPermissionStatus(to: id)
@@ -450,6 +447,10 @@ final class MacWebSocketServer: @unchecked Sendable {
             guard var context = clients[id] else { return }
             context.secureSession = SecureSession(clientDeviceID: clientDeviceID, controlKey: controlKey, mediaKey: mediaKey)
             clients[id] = context
+            // Trigger bootstrap media packets only after secure transport exists,
+            // otherwise config/keyframe can be emitted before this client can receive them.
+            h264Encoder.requestStreamResync()
+            aacEncoder.requestStreamResync()
 
             let hostSignaturePayload = Self.signaturePayload(token: token, deviceID: hostDeviceID, ephemeralPublicKey: hostEphemeralPublicData)
             let hostSignature = try localSigningPrivateKey.signature(for: hostSignaturePayload)
