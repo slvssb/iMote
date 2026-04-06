@@ -29,6 +29,8 @@ targets:
         NSLocalNetworkUsageDescription: This app discovers and connects to your Mac keyboard server on local Wi-Fi.
         NSBonjourServices:
           - _rkbd._tcp
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.slvssb.imote.app
