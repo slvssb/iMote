@@ -228,9 +228,16 @@ private let decompressionOutputCallback: VTDecompressionOutputCallback = { refCo
         return
     }
 
+    let outputPTS: CMTime
+    if presentationTimeStamp.isValid {
+        outputPTS = presentationTimeStamp
+    } else {
+        // AVSampleBufferDisplayLayer is more reliable with concrete timing than `.invalid`.
+        outputPTS = CMClockGetTime(CMClockGetHostTimeClock())
+    }
     var timingInfo = CMSampleTimingInfo(
-        duration: .invalid,
-        presentationTimeStamp: .invalid,
+        duration: CMTime(value: 1, timescale: 60),
+        presentationTimeStamp: outputPTS,
         decodeTimeStamp: .invalid
     )
     var outputSampleBuffer: CMSampleBuffer?
