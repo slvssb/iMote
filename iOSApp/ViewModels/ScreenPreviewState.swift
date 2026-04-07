@@ -11,6 +11,7 @@ final class ScreenPreviewState: ObservableObject {
     @Published private(set) var lastFrameReceivedAt: Date?
     @Published private(set) var sourceAspectRatio: CGFloat = 16.0 / 10.0
     @Published var statsLabel = "No frames yet"
+    @Published var hostCaptureStatusLabel = "Host: unknown"
     @Published private(set) var followAnchor = UnitPoint.center
     @Published private(set) var previewGlowColor = Color(red: 0.22, green: 0.28, blue: 0.36)
     let displayBridge = SampleBufferDisplayBridge()
@@ -42,6 +43,7 @@ final class ScreenPreviewState: ObservableObject {
         sourceAspectRatio = 16.0 / 10.0
         frameTimestamps.removeAll()
         statsLabel = "No frames yet"
+        hostCaptureStatusLabel = "Host: unknown"
         followAnchor = .center
         smoothedFPS = nil
         displayedFPS = nil
@@ -95,6 +97,34 @@ final class ScreenPreviewState: ObservableObject {
             smoothedDecodeLatencyMs = ms
         }
         updateStatsLabel()
+    }
+
+    func updateHostCaptureStatus(routeLabel: String?, displayCount: Int?, isActive: Bool?) {
+        let normalizedRoute: String
+        if let routeLabel, routeLabel.isEmpty == false {
+            normalizedRoute = routeLabel
+        } else {
+            normalizedRoute = "Unknown"
+        }
+
+        let displaySummary: String
+        if let displayCount {
+            displaySummary = "\(displayCount) display" + (displayCount == 1 ? "" : "s")
+        } else {
+            displaySummary = "display count unknown"
+        }
+
+        let activitySummary: String
+        switch isActive {
+        case true:
+            activitySummary = "live"
+        case false:
+            activitySummary = "no frames"
+        case nil:
+            activitySummary = "state unknown"
+        }
+
+        hostCaptureStatusLabel = "Host: \(normalizedRoute) • \(displaySummary) • \(activitySummary)"
     }
 
     private func recordArrival() {

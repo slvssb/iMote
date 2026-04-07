@@ -17,6 +17,8 @@ actor MacScreenCaptureProvider {
     private static let targetFPS: Int32 = 60
 
     private var contentFilter: SCContentFilter?
+    private var activeDisplayID: CGDirectDisplayID?
+    private var preferredPrimaryDisplayID: CGDirectDisplayID?
     private var sourceWidth: CGFloat = 0
     private var sourceHeight: CGFloat = 0
     private var displayFrame: CGRect = .zero
@@ -27,6 +29,8 @@ actor MacScreenCaptureProvider {
     private var activeMaxWidth: CGFloat = 0
     private var audioCaptureSource: AudioCaptureSource = .off
     private var audioSampleHandler: ((CapturedAudioSampleBuffer) -> Void)?
+    private var activeCaptureRouteLabel: String = "Unknown"
+    private var preferFallbackDisplay = false
 
     func makeFramePixelBuffer(maxWidth: CGFloat = 1920) async -> CapturedPixelBuffer? {
         do {
@@ -58,6 +62,8 @@ actor MacScreenCaptureProvider {
         }
         self.stream = nil
         self.streamOutput = nil
+        self.activeDisplayID = nil
+        self.activeCaptureRouteLabel = "Unknown"
         self.latestPixelBuffer = nil
         self.activeMaxWidth = 0
     }
@@ -106,15 +112,34 @@ actor MacScreenCaptureProvider {
         return CGPoint(x: clampedX, y: clampedY)
     }
 
+    func currentCaptureRouteLabel() -> String {
+        activeCaptureRouteLabel
+    }
+
+    func setPreferFallbackDisplay(_ enabled: Bool) {
+        preferFallbackDisplay = enabled
+    }
+
     private func prepareCaptureFilter() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first else {
+        guard let display = selectCaptureDisplay(from: content.displays) else {
+            activeDisplayID = nil
+            activeCaptureRouteLabel = "Unknown"
             return
         }
 
         sourceWidth = CGFloat(display.width)
         sourceHeight = CGFloat(display.height)
         displayFrame = display.frame
+        activeDisplayID = display.displayID
+        if preferFallbackDisplay == false {
+            // Remember the display we are actively mirroring while the real monitor path is healthy.
+            preferredPrimaryDisplayID = display.displayID
+        }
+        activeCaptureRouteLabel = resolveCaptureRouteLabel(
+            selectedDisplayID: display.displayID,
+            displayCount: content.displays.count
+        )
         contentFilter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
     }
 
@@ -183,6 +208,49 @@ actor MacScreenCaptureProvider {
 
     fileprivate func consumeAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
         audioSampleHandler?(sampleBuffer)
+    }
+
+    private func selectCaptureDisplay(from displays: [SCDisplay]) -> SCDisplay? {
+        guard displays.isEmpty == false else { return nil }
+
+        if preferFallbackDisplay {
+            if let preferredPrimaryDisplayID {
+                let fallbackDisplays = displays.filter { $0.displayID != preferredPrimaryDisplayID }
+                if let fallback = fallbackDisplays.max(by: { ($0.width * $0.height) < ($1.width * $1.height) }) {
+                    return fallback
+                }
+            }
+
+            return displays.max { lhs, rhs in
+                (lhs.width * lhs.height) < (rhs.width * rhs.height)
+            }
+        }
+
+        if let preferredPrimaryDisplayID,
+           let preferredDisplay = displays.first(where: { $0.displayID == preferredPrimaryDisplayID }) {
+            return preferredDisplay
+        }
+
+        if let mainDisplay = displays.first(where: { $0.displayID == CGMainDisplayID() }) {
+            preferredPrimaryDisplayID = mainDisplay.displayID
+            return mainDisplay
+        }
+
+        return displays.max { lhs, rhs in
+            (lhs.width * lhs.height) < (rhs.width * rhs.height)
+        }
+    }
+
+    private func resolveCaptureRouteLabel(selectedDisplayID: CGDirectDisplayID, displayCount: Int) -> String {
+        if let preferredPrimaryDisplayID {
+            return selectedDisplayID == preferredPrimaryDisplayID ? "Real" : "Dummy/Fallback"
+        }
+
+        if displayCount > 1 {
+            return selectedDisplayID == CGMainDisplayID() ? "Real" : "Dummy/Fallback"
+        }
+
+        return "Real"
     }
 }
 private final class StreamOutput: NSObject, SCStreamOutput {

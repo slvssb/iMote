@@ -24,6 +24,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onAACConfig: ((Data) -> Void)?
     var onAACFrame: ((Data) -> Void)?
     var onThermalOverrideChanged: ((Bool) -> Void)?
+    var onHostCaptureStatusChanged: ((String?, Int?, Bool?) -> Void)?
     var onPermissionStatus: ((Bool, Bool) -> Void)?
 
     private var session: URLSession!
@@ -255,6 +256,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                 break
             case .streamStatus:
                 onThermalOverrideChanged?(decoded.thermalOverrideActive ?? false)
+                onHostCaptureStatusChanged?(decoded.captureRoute, decoded.hostDisplayCount, decoded.previewCaptureActive)
             case .permissionStatus:
                 onPermissionStatus?(decoded.accessibilityGranted ?? false, decoded.screenRecordingGranted ?? false)
             default:

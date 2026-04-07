@@ -16,6 +16,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     var onStateChange: ((String) -> Void)?
     var onClientsChange: (([ClientSnapshot]) -> Void)?
     var onRuntimeError: ((String) -> Void)?
+    var onCaptureRouteChange: ((String) -> Void)?
 
     private struct ClientContext {
         let id: UUID
@@ -41,6 +42,9 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var thermalObserver: NSObjectProtocol?
     private var workspaceSleepObserver: NSObjectProtocol?
     private var workspaceWakeObserver: NSObjectProtocol?
+    private var workspaceScreensSleepObserver: NSObjectProtocol?
+    private var workspaceScreensWakeObserver: NSObjectProtocol?
+    private var screenParametersObserver: NSObjectProtocol?
 
     private var listener: NWListener?
     private var listenerPort: UInt16 = 8989
@@ -59,12 +63,18 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var adaptiveWindowTickCount = 0
     private var adaptiveWindowSkippedCount = 0
     private var adaptiveWindowEncodedCount = 0
+    private var streamStatusHeartbeatTickCount = 0
     private var audioDebugSentConfigCount = 0
     private var audioDebugSentFrameCount = 0
     private var localSigningPrivateKey = MacWebSocketServer.loadOrCreateSigningPrivateKey()
     private let hostDeviceID = MacWebSocketServer.loadOrCreateHostDeviceID()
     private var isSystemSleeping = false
+    private var isDisplaySleeping = false
     private var isWakeRecoveryInProgress = false
+    private var lastCaptureRecoveryAttemptAt: Date?
+    private var recoveryBurstGeneration: UInt64 = 0
+    private var lastPublishedCaptureRouteLabel: String = "Unknown"
+    private var lastPublishedCaptureActive: Bool?
 
     private enum BinaryPacketMarker {
         static let encryptedMedia: UInt8 = 0x7E
@@ -159,6 +169,39 @@ final class MacWebSocketServer: @unchecked Sendable {
                 self?.handleSystemDidWake()
             }
         }
+
+        workspaceScreensSleepObserver = workspaceCenter.addObserver(
+            forName: NSWorkspace.screensDidSleepNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.queue.async { [weak self] in
+                self?.handleDisplaysDidSleep()
+            }
+        }
+
+        workspaceScreensWakeObserver = workspaceCenter.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.queue.async { [weak self] in
+                self?.handleDisplaysDidWake()
+            }
+        }
+
+        screenParametersObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.queue.async { [weak self] in
+                self?.handleScreenParametersDidChange()
+            }
+        }
     }
 
     deinit {
@@ -171,6 +214,15 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
         if let workspaceWakeObserver {
             workspaceCenter.removeObserver(workspaceWakeObserver)
+        }
+        if let workspaceScreensSleepObserver {
+            workspaceCenter.removeObserver(workspaceScreensSleepObserver)
+        }
+        if let workspaceScreensWakeObserver {
+            workspaceCenter.removeObserver(workspaceScreensWakeObserver)
+        }
+        if let screenParametersObserver {
+            NotificationCenter.default.removeObserver(screenParametersObserver)
         }
     }
 
@@ -461,6 +513,7 @@ final class MacWebSocketServer: @unchecked Sendable {
                 signature: hostSignature.base64EncodedString(),
                 token: token
             ), to: id)
+            sendStreamStatus(to: id)
             publishClients()
         } catch {
             send(.error("Failed to establish secure channel"), to: id)
@@ -787,6 +840,12 @@ final class MacWebSocketServer: @unchecked Sendable {
             return
         }
 
+        streamStatusHeartbeatTickCount += 1
+        if streamStatusHeartbeatTickCount >= 60 {
+            streamStatusHeartbeatTickCount = 0
+            sendStreamStatusToAllPairedClients()
+        }
+
         let pairedClientIDs = clients.compactMap { id, context in
             context.token == nil ? nil : id
         }
@@ -804,9 +863,11 @@ final class MacWebSocketServer: @unchecked Sendable {
             guard let self else { return }
             let framePixelBuffer = await self.screenCaptureProvider.makeFramePixelBuffer(maxWidth: self.previewCaptureMaxWidth)
             let cursorPosition = await self.screenCaptureProvider.normalizedCursorPosition()
+            let captureRouteLabel = await self.screenCaptureProvider.currentCaptureRouteLabel()
             self.queue.async { [weak self] in
                 guard let self else { return }
                 self.isFrameCaptureInFlight = false
+                self.publishCaptureRouteIfNeeded(captureRouteLabel)
 
                 if let cursorPosition {
                     let cursorMessage = RemoteMessage.cursorPosition(
@@ -820,14 +881,19 @@ final class MacWebSocketServer: @unchecked Sendable {
 
                 guard let framePixelBuffer else {
                     self.consecutiveFrameFailures += 1
+                    self.publishCaptureActivityIfNeeded()
                     self.updateAdaptiveBitrateIfNeeded()
                     if self.consecutiveFrameFailures % 30 == 0 {
                         self.reportError("Screen preview capture failed repeatedly. Confirm Screen Recording permission for the Mac app.")
+                    }
+                    if self.consecutiveFrameFailures >= 60 {
+                        self.recoverCapturePipelineIfNeeded(stateMessage: "Recovered capture after frame loss")
                     }
                     return
                 }
 
                 self.consecutiveFrameFailures = 0
+                self.publishCaptureActivityIfNeeded()
                 self.h264Encoder.encode(pixelBuffer: framePixelBuffer.value)
                 self.adaptiveWindowEncodedCount += 1
                 self.updateAdaptiveBitrateIfNeeded()
@@ -837,14 +903,73 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private func handleSystemWillSleep() {
         isSystemSleeping = true
+        isDisplaySleeping = true
+        Task { [weak self] in
+            await self?.screenCaptureProvider.setPreferFallbackDisplay(true)
+        }
         isFrameCaptureInFlight = false
         consecutiveFrameFailures = 0
+        publishCaptureActivityIfNeeded()
     }
 
     private func handleSystemDidWake() {
         isSystemSleeping = false
+        isDisplaySleeping = false
+        Task { [weak self] in
+            await self?.screenCaptureProvider.setPreferFallbackDisplay(false)
+        }
+        publishCaptureActivityIfNeeded()
+        scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after wake")
+    }
+
+    private func handleDisplaysDidSleep() {
+        isDisplaySleeping = true
+        Task { [weak self] in
+            await self?.screenCaptureProvider.setPreferFallbackDisplay(true)
+        }
+        isFrameCaptureInFlight = false
+        consecutiveFrameFailures = 0
+        publishCaptureActivityIfNeeded()
+        scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display sleep")
+    }
+
+    private func handleDisplaysDidWake() {
+        isDisplaySleeping = false
+        Task { [weak self] in
+            await self?.screenCaptureProvider.setPreferFallbackDisplay(false)
+        }
+        publishCaptureActivityIfNeeded()
+        scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display wake")
+    }
+
+    private func handleScreenParametersDidChange() {
+        guard isSystemSleeping == false else { return }
+        scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display reconfiguration")
+    }
+
+    private func scheduleCaptureRecoveryBurst(stateMessage: String) {
+        recoveryBurstGeneration &+= 1
+        let generation = recoveryBurstGeneration
+        let delays: [TimeInterval] = [0, 0.5, 1.0, 2.0, 4.0]
+
+        for delay in delays {
+            queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                guard self.recoveryBurstGeneration == generation else { return }
+                self.recoverCapturePipelineIfNeeded(stateMessage: stateMessage)
+            }
+        }
+    }
+
+    private func recoverCapturePipelineIfNeeded(stateMessage: String) {
         guard isWakeRecoveryInProgress == false else { return }
+        if let lastAttempt = lastCaptureRecoveryAttemptAt,
+           Date().timeIntervalSince(lastAttempt) < 0.35 {
+            return
+        }
+
         isWakeRecoveryInProgress = true
+        lastCaptureRecoveryAttemptAt = Date()
 
         let maxWidth = previewCaptureMaxWidth
         Task { [weak self] in
@@ -855,47 +980,15 @@ final class MacWebSocketServer: @unchecked Sendable {
                 self.isWakeRecoveryInProgress = false
                 self.isFrameCaptureInFlight = false
                 self.consecutiveFrameFailures = 0
+                self.publishCaptureActivityIfNeeded()
 
                 if recovered {
                     self.h264Encoder.requestStreamResync()
                     self.aacEncoder.requestStreamResync()
-                    Task { @MainActor in
-                        self.onStateChange?("Recovered capture after wake")
-                    }
                 } else {
-                    self.forceRestartServerAfterWakeFailure()
+                    self.reportError("Capture recovery failed. Retrying automatically.")
                 }
             }
-        }
-    }
-
-    private func forceRestartServerAfterWakeFailure() {
-        let port = listenerPort
-
-        clients.values.forEach { context in
-            context.connection.cancel()
-        }
-        clients.removeAll()
-        listener?.cancel()
-        listener = nil
-        stopFrameBroadcasting()
-        isFrameCaptureInFlight = false
-        consecutiveFrameFailures = 0
-
-        Task { [weak self] in
-            await self?.screenCaptureProvider.stopCapture()
-        }
-        h264Encoder.stop()
-        aacEncoder.stop()
-        publishClients()
-
-        do {
-            try start(port: port)
-            Task { @MainActor in
-                self.onStateChange?("Wake recovery fallback: listener restarted")
-            }
-        } catch {
-            reportError("Wake recovery restart failed: \(error.localizedDescription)")
         }
     }
 
@@ -929,6 +1022,35 @@ final class MacWebSocketServer: @unchecked Sendable {
         Task { @MainActor in
             self.onRuntimeError?(reason)
         }
+    }
+
+    private func publishCaptureRouteIfNeeded(_ label: String) {
+        guard lastPublishedCaptureRouteLabel != label else { return }
+        lastPublishedCaptureRouteLabel = label
+        Task { @MainActor in
+            self.onCaptureRouteChange?(label)
+        }
+        sendStreamStatusToAllPairedClients()
+    }
+
+    private func publishCaptureActivityIfNeeded() {
+        let captureActive = currentPreviewCaptureActive()
+        guard lastPublishedCaptureActive != captureActive else { return }
+        lastPublishedCaptureActive = captureActive
+        sendStreamStatusToAllPairedClients()
+    }
+
+    private func currentPreviewCaptureActive() -> Bool {
+        isSystemSleeping == false && consecutiveFrameFailures < 15
+    }
+
+    private func currentHostDisplayCount() -> Int {
+        let maxDisplays: UInt32 = 16
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(maxDisplays))
+        var count: UInt32 = 0
+        let result = CGGetOnlineDisplayList(maxDisplays, &displays, &count)
+        guard result == .success else { return 0 }
+        return Int(count)
     }
 
     private func handleThermalStateChange(_ state: ProcessInfo.ThermalState) {
@@ -1028,7 +1150,15 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func sendStreamStatus(to id: UUID) {
-        send(.streamStatus(thermalOverrideActive: isThermalOverrideActive), to: id)
+        send(
+            .streamStatus(
+                thermalOverrideActive: isThermalOverrideActive,
+                captureRoute: lastPublishedCaptureRouteLabel,
+                hostDisplayCount: currentHostDisplayCount(),
+                previewCaptureActive: currentPreviewCaptureActive()
+            ),
+            to: id
+        )
     }
 
     private func sendStreamStatusToAllPairedClients() {

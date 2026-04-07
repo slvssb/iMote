@@ -252,6 +252,15 @@ final class IOSKeyboardViewModel: ObservableObject {
             self.isThermalQualityOverrideActive = isActive
         }
 
+        client.onHostCaptureStatusChanged = { [weak self] routeLabel, displayCount, isActive in
+            guard let self else { return }
+            self.screenPreview.updateHostCaptureStatus(
+                routeLabel: routeLabel,
+                displayCount: displayCount,
+                isActive: isActive
+            )
+        }
+
         client.onPermissionStatus = { [weak self] accessibilityGranted, screenRecordingGranted in
             guard let self else { return }
             guard self.isPaired else { return }

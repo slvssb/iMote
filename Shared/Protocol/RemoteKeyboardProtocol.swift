@@ -91,6 +91,9 @@ public struct RemoteMessage: Codable, Sendable {
     public var previewZoomLevel: Double?
     public var trustAction: TrustControlAction?
     public var thermalOverrideActive: Bool?
+    public var captureRoute: String?
+    public var hostDisplayCount: Int?
+    public var previewCaptureActive: Bool?
     public var frameBase64: String?
     public var audioSource: AudioCaptureSource?
     public var permissionAction: HostPermissionAction?
@@ -124,6 +127,9 @@ public struct RemoteMessage: Codable, Sendable {
         previewZoomLevel: Double? = nil,
         trustAction: TrustControlAction? = nil,
         thermalOverrideActive: Bool? = nil,
+        captureRoute: String? = nil,
+        hostDisplayCount: Int? = nil,
+        previewCaptureActive: Bool? = nil,
         frameBase64: String? = nil,
         audioSource: AudioCaptureSource? = nil,
         permissionAction: HostPermissionAction? = nil,
@@ -156,6 +162,9 @@ public struct RemoteMessage: Codable, Sendable {
         self.previewZoomLevel = previewZoomLevel
         self.trustAction = trustAction
         self.thermalOverrideActive = thermalOverrideActive
+        self.captureRoute = captureRoute
+        self.hostDisplayCount = hostDisplayCount
+        self.previewCaptureActive = previewCaptureActive
         self.frameBase64 = frameBase64
         self.audioSource = audioSource
         self.permissionAction = permissionAction
@@ -269,8 +278,19 @@ public struct RemoteMessage: Codable, Sendable {
         RemoteMessage(type: .trustControl, token: token, deviceID: deviceID, trustAction: action)
     }
 
-    public static func streamStatus(thermalOverrideActive: Bool) -> RemoteMessage {
-        RemoteMessage(type: .streamStatus, thermalOverrideActive: thermalOverrideActive)
+    public static func streamStatus(
+        thermalOverrideActive: Bool,
+        captureRoute: String? = nil,
+        hostDisplayCount: Int? = nil,
+        previewCaptureActive: Bool? = nil
+    ) -> RemoteMessage {
+        RemoteMessage(
+            type: .streamStatus,
+            thermalOverrideActive: thermalOverrideActive,
+            captureRoute: captureRoute,
+            hostDisplayCount: hostDisplayCount,
+            previewCaptureActive: previewCaptureActive
+        )
     }
 
     public static func audioConfig(source: AudioCaptureSource, token: String?) -> RemoteMessage {

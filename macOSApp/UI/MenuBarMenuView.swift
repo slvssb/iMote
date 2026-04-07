@@ -31,6 +31,9 @@ struct MenuBarMenuView: View {
             Text(appState.serverStatus)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Text("Capturing: \(appState.captureRouteStatus)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

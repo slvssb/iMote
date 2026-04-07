@@ -12,6 +12,7 @@ final class MacAppState: ObservableObject {
     @Published var trustedDevicesCount = 0
     @Published var lastError: String?
     @Published var startOnLoginEnabled = false
+    @Published var captureRouteStatus = "Unknown"
 
     private let pairingManager = PairingManager()
     private let permissionManager = AccessibilityPermissionManager()
@@ -48,6 +49,7 @@ final class MacAppState: ObservableObject {
         server.stop()
         serverStatus = "Stopped"
         connectedDeviceNames = []
+        captureRouteStatus = "Unknown"
     }
 
     func regeneratePairCode() {
@@ -98,6 +100,10 @@ final class MacAppState: ObservableObject {
 
         server.onRuntimeError = { [weak self] reason in
             self?.lastError = reason
+        }
+
+        server.onCaptureRouteChange = { [weak self] route in
+            self?.captureRouteStatus = route
         }
     }
 

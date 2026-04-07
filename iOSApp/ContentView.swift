@@ -103,12 +103,20 @@ private struct PreviewStatsStripView: View {
         ZStack {
             HStack {
                 Spacer(minLength: 0)
-                Text(preview.statsLabel)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                VStack(spacing: 2) {
+                    Text(preview.statsLabel)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(preview.hostCaptureStatusLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
                 Spacer(minLength: 0)
             }
 
