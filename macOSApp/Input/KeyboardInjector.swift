@@ -29,6 +29,7 @@ final class KeyboardInjector {
     private var lastMouseTapButton: MouseButton?
     private var lastMouseTapClickCount: Int64 = 0
     private var pressedMouseButtons: Set<MouseButton> = []
+    private var controlArrowSource: CGEventSource?
 
     init(permissionManager: AccessibilityPermissionManager) {
         self.permissionManager = permissionManager
@@ -261,35 +262,61 @@ final class KeyboardInjector {
             throw KeyboardInjectorError.eventBuildFailed
         }
 
-        let controlFlags: CGEventFlags = [.maskControl]
-        try postKeyEvent(
-            keyCode: controlKeyCode,
-            keyDown: true,
-            flags: controlFlags,
-            sourceState: .hidSystemState,
-            tap: .cghidEventTap
-        )
-        try postKeyEvent(
-            keyCode: keyCode,
-            keyDown: true,
-            flags: controlFlags,
-            sourceState: .hidSystemState,
-            tap: .cghidEventTap
-        )
-        try postKeyEvent(
-            keyCode: keyCode,
-            keyDown: false,
-            flags: controlFlags,
-            sourceState: .hidSystemState,
-            tap: .cghidEventTap
-        )
-        try postKeyEvent(
-            keyCode: controlKeyCode,
-            keyDown: false,
-            flags: [],
-            sourceState: .hidSystemState,
-            tap: .cghidEventTap
-        )
+        if controlArrowSource == nil {
+            let src = CGEventSource(stateID: .privateState)
+            src?.localEventsSuppressionInterval = 0
+            controlArrowSource = src
+        }
+        guard let source = controlArrowSource else {
+            throw KeyboardInjectorError.eventBuildFailed
+        }
+
+        let kbdType = Int64(CGEventSource(stateID: .hidSystemState)?.keyboardType ?? 59)
+        let deviceLeftControl = CGEventFlags(rawValue: 0x00000001)
+        let controlHeld: CGEventFlags = [.maskControl, .maskNonCoalesced, deviceLeftControl]
+        let released: CGEventFlags = [.maskNonCoalesced]
+
+        guard let clearFlags = CGEvent(keyboardEventSource: source, virtualKey: controlKeyCode, keyDown: false) else {
+            throw KeyboardInjectorError.eventBuildFailed
+        }
+        clearFlags.type = .flagsChanged
+        clearFlags.flags = released
+        clearFlags.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
+        clearFlags.post(tap: .cghidEventTap)
+        usleep(3000)
+
+        guard let ctrlDown = CGEvent(keyboardEventSource: source, virtualKey: controlKeyCode, keyDown: true) else {
+            throw KeyboardInjectorError.eventBuildFailed
+        }
+        ctrlDown.type = .flagsChanged
+        ctrlDown.flags = controlHeld
+        ctrlDown.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
+        ctrlDown.post(tap: .cghidEventTap)
+        usleep(2000)
+
+        guard let arrowDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true) else {
+            throw KeyboardInjectorError.eventBuildFailed
+        }
+        arrowDown.flags = controlHeld
+        arrowDown.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
+        arrowDown.post(tap: .cghidEventTap)
+        usleep(2000)
+
+        guard let arrowUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            throw KeyboardInjectorError.eventBuildFailed
+        }
+        arrowUp.flags = controlHeld
+        arrowUp.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
+        arrowUp.post(tap: .cghidEventTap)
+        usleep(50000)
+
+        guard let ctrlUp = CGEvent(keyboardEventSource: source, virtualKey: controlKeyCode, keyDown: false) else {
+            throw KeyboardInjectorError.eventBuildFailed
+        }
+        ctrlUp.type = .flagsChanged
+        ctrlUp.flags = released
+        ctrlUp.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
+        ctrlUp.post(tap: .cghidEventTap)
     }
 
     private func modifierKeyCode(for modifier: RemoteModifier) -> CGKeyCode? {
