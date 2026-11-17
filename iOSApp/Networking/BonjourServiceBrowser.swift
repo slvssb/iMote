@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct DiscoveredService: Identifiable, Hashable {
@@ -48,21 +49,58 @@ extension BonjourServiceBrowser: NetServiceBrowserDelegate {
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
-        if let host = service.hostName {
-            let normalizedHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            services.removeAll { $0.host == normalizedHost }
-        }
+        services.removeAll { $0.name == service.name }
         resolving.removeAll { $0 == service }
     }
 }
 
 extension BonjourServiceBrowser: NetServiceDelegate {
     func netServiceDidResolveAddress(_ sender: NetService) {
-        let host = (sender.hostName ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        guard !host.isEmpty, sender.port > 0 else { return }
+        defer { resolving.removeAll { $0 == sender } }
+        let host = Self.connectableHost(from: sender)
+        guard host.isEmpty == false, sender.port > 0 else { return }
 
         let discovered = DiscoveredService(name: sender.name, host: host, port: sender.port)
         upsert(discovered)
+    }
+
+    /// Prefer a resolved numeric address. `.local` names fail when multicast DNS does not,
+    /// and an IPv6 literal is bracketed later by `RemoteHostAddress.webSocketURL`.
+    private static func connectableHost(from service: NetService) -> String {
+        if let address = numericAddress(from: service) {
+            return address
+        }
+        return (service.hostName ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    }
+
+    private static func numericAddress(from service: NetService) -> String? {
+        guard let addresses = service.addresses else { return nil }
+        var ipv4: String?
+        var ipv6: String?
+        for data in addresses {
+            data.withUnsafeBytes { rawBuffer in
+                guard let base = rawBuffer.baseAddress, rawBuffer.count >= MemoryLayout<sockaddr>.size else { return }
+                let family = base.assumingMemoryBound(to: sockaddr.self).pointee.sa_family
+                if family == sa_family_t(AF_INET), rawBuffer.count >= MemoryLayout<sockaddr_in>.size {
+                    var address = base.assumingMemoryBound(to: sockaddr_in.self).pointee
+                    var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                    if inet_ntop(AF_INET, &address.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil {
+                        ipv4 = String(cString: buffer)
+                    }
+                } else if family == sa_family_t(AF_INET6), rawBuffer.count >= MemoryLayout<sockaddr_in6>.size {
+                    var address = base.assumingMemoryBound(to: sockaddr_in6.self).pointee
+                    var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                    guard inet_ntop(AF_INET6, &address.sin6_addr, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil else {
+                        return
+                    }
+                    let text = String(cString: buffer)
+                    if text.hasPrefix("fe80") == false, ipv6 == nil {
+                        ipv6 = text
+                    }
+                }
+            }
+        }
+        return ipv4 ?? ipv6
     }
 
     func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
