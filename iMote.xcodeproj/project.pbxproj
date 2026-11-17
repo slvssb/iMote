@@ -42,6 +42,8 @@
 		F87C5BA31D4641564A3AA785 /* RemoteKeyboardProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */; };
 		A1F1A1F1A1F1A1F1A1F10002 /* IdentityFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */; };
 		A1F1A1F1A1F1A1F1A1F10003 /* IdentityFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */; };
+		A1F1A1F1A1F1A1F1A1F10005 /* SecureChannelCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */; };
+		A1F1A1F1A1F1A1F1A1F10006 /* SecureChannelCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -69,6 +71,7 @@
 		A30B15F95157EBCD2481742E /* IMoteiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMoteiOSApp.swift; sourceTree = "<group>"; };
 		A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteKeyboardProtocol.swift; sourceTree = "<group>"; };
 		A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityFingerprint.swift; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureChannelCodec.swift; sourceTree = "<group>"; };
 		C0DE6379HOSTENDPTCAT001 /* HostEndpointCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostEndpointCatalog.swift; sourceTree = "<group>"; };
 		C0DE6379HOSTMAINWINDOW01 /* HostMainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostMainWindow.swift; sourceTree = "<group>"; };
 		C0DE6379REMOTEHOSTADDR01 /* RemoteHostAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHostAddress.swift; sourceTree = "<group>"; };
@@ -278,6 +281,7 @@
 			isa = PBXGroup;
 			children = (
 				A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */,
+				A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */,
 			);
 			path = Security;
 			sourceTree = "<group>";
@@ -406,6 +410,7 @@
 				445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */,
 				F87C5BA31D4641564A3AA785 /* RemoteKeyboardProtocol.swift in Sources */,
 				A1F1A1F1A1F1A1F1A1F10003 /* IdentityFingerprint.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10006 /* SecureChannelCodec.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -427,6 +432,7 @@
 				EC0E9A83442F46E768DE86AE /* LiquidGlass.swift in Sources */,
 				3B321DF188E6DA67E424EA2C /* RemoteKeyboardProtocol.swift in Sources */,
 				A1F1A1F1A1F1A1F1A1F10002 /* IdentityFingerprint.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10005 /* SecureChannelCodec.swift in Sources */,
 				5BA8D4731CB7DD70F5E2BAE7 /* IMoteiOSApp.swift in Sources */,
 				3413DD972F8050EA0086D1D8 /* EyeCursorController.swift in Sources */,
 			);

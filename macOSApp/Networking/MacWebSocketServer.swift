@@ -40,6 +40,9 @@ final class MacWebSocketServer: @unchecked Sendable {
         let clientDeviceID: String
         let controlKey: SymmetricKey
         let mediaKey: SymmetricKey
+        var clientToHostControlCounter: UInt64 = 0
+        var hostToClientControlCounter: UInt64 = 0
+        var hostToClientMediaCounter: UInt64 = 0
     }
 
     private let pairingManager: PairingManager
@@ -415,6 +418,9 @@ final class MacWebSocketServer: @unchecked Sendable {
         case .trustControl:
             if isFromSecureChannel { handleTrustControl(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .ping:
+            if clients[id]?.secureSession != nil, isFromSecureChannel == false {
+                return
+            }
             send(RemoteMessage(type: .pong), to: id)
         default:
             break
@@ -422,21 +428,27 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func handleSecureControl(_ message: RemoteMessage, from id: UUID) {
-        guard authorize(id: id, token: message.token),
-              let context = clients[id],
-              let secureSession = context.secureSession else {
+        guard var context = clients[id], var secureSession = context.secureSession else {
             send(.error("Unauthorized secure control session"), to: id)
             return
         }
         guard let payloadBase64 = message.securePayload,
               let combined = Data(base64Encoded: payloadBase64) else {
-            send(.error("Malformed secure control payload"), to: id)
+            failSecureChannel(id: id, reason: RemoteProtocol.secureChannelFailedReason)
             return
         }
 
         do {
-            let sealedBox = try ChaChaPoly.SealedBox(combined: combined)
-            let plaintext = try ChaChaPoly.open(sealedBox, using: secureSession.controlKey)
+            let plaintext = try SecureChannelCodec.open(
+                combined: combined,
+                using: secureSession.controlKey,
+                kind: .control,
+                direction: .clientToHost,
+                counter: secureSession.clientToHostControlCounter
+            )
+            secureSession.clientToHostControlCounter += 1
+            context.secureSession = secureSession
+            clients[id] = context
             let inner = try RemoteProtocolCodec.decode(plaintext)
             guard inner.type != .secureControl else {
                 send(.error("Nested secure control payload is not allowed"), to: id)
@@ -444,8 +456,18 @@ final class MacWebSocketServer: @unchecked Sendable {
             }
             handleDecodedMessage(inner, from: id, isFromSecureChannel: true)
         } catch {
-            send(.error("Unable to decrypt secure control payload"), to: id)
+            failSecureChannel(id: id, reason: RemoteProtocol.secureChannelFailedReason)
         }
+    }
+
+    private func failSecureChannel(id: UUID, reason: String) {
+        guard let context = clients[id] else { return }
+        var cleared = context
+        cleared.secureSession = nil
+        clients[id] = cleared
+        send(.error(reason), to: id)
+        context.connection.cancel()
+        disconnect(id: id)
     }
 
     private func handlePair(_ message: RemoteMessage, from id: UUID) {
@@ -528,13 +550,13 @@ final class MacWebSocketServer: @unchecked Sendable {
             let controlKey = sharedSecret.hkdfDerivedSymmetricKey(
                 using: SHA256.self,
                 salt: salt,
-                sharedInfo: Data("iMote.e2e.control.v1".utf8),
+                sharedInfo: Data("iMote.e2e.control.v2".utf8),
                 outputByteCount: 32
             )
             let mediaKey = sharedSecret.hkdfDerivedSymmetricKey(
                 using: SHA256.self,
                 salt: salt,
-                sharedInfo: Data("iMote.e2e.media.v1".utf8),
+                sharedInfo: Data("iMote.e2e.media.v2".utf8),
                 outputByteCount: 32
             )
 
@@ -783,10 +805,46 @@ final class MacWebSocketServer: @unchecked Sendable {
         if let deviceIDOverride {
             message.deviceID = deviceIDOverride
         }
+        if shouldProtect(message, clientID: id) {
+            sendEncryptedControl(message, to: id)
+            return
+        }
         guard let payload = try? RemoteProtocolCodec.encode(message) else {
             return
         }
         sendBinaryFrame(payload, to: id)
+    }
+
+    private func shouldProtect(_ message: RemoteMessage, clientID: UUID) -> Bool {
+        guard clients[clientID]?.secureSession != nil else { return false }
+        switch message.type {
+        case .pair, .pairAck, .e2eHello, .e2eHelloAck:
+            return false
+        default:
+            return true
+        }
+    }
+
+    private func sendEncryptedControl(_ message: RemoteMessage, to id: UUID) {
+        guard var context = clients[id], var session = context.secureSession else { return }
+        do {
+            let plaintext = try RemoteProtocolCodec.encode(message)
+            let combined = try SecureChannelCodec.seal(
+                plaintext,
+                using: session.controlKey,
+                kind: .control,
+                direction: .hostToClient,
+                counter: session.hostToClientControlCounter
+            )
+            session.hostToClientControlCounter += 1
+            context.secureSession = session
+            clients[id] = context
+            let outer = RemoteMessage.secureControl(payloadBase64: combined.base64EncodedString())
+            guard let payload = try? RemoteProtocolCodec.encode(outer) else { return }
+            sendBinaryFrame(payload, to: id)
+        } catch {
+            failSecureChannel(id: id, reason: RemoteProtocol.secureChannelFailedReason)
+        }
     }
 
     private func sendBinaryFrame(_ payload: Data, to id: UUID) {
@@ -800,14 +858,24 @@ final class MacWebSocketServer: @unchecked Sendable {
             metadata: [metadata]
         )
         let outboundPayload: Data
-        if let secureSession = context.secureSession, Self.isMediaPacket(payload) {
+        if var session = context.secureSession, Self.isMediaPacket(payload) {
             do {
-                let sealedBox = try ChaChaPoly.seal(payload, using: secureSession.mediaKey)
+                let combined = try SecureChannelCodec.seal(
+                    payload,
+                    using: session.mediaKey,
+                    kind: .media,
+                    direction: .hostToClient,
+                    counter: session.hostToClientMediaCounter
+                )
+                session.hostToClientMediaCounter += 1
+                var updated = context
+                updated.secureSession = session
+                clients[id] = updated
                 var packet = Data([BinaryPacketMarker.encryptedMedia])
-                packet.append(sealedBox.combined)
+                packet.append(combined)
                 outboundPayload = packet
             } catch {
-                reportError("Failed to encrypt media packet")
+                failSecureChannel(id: id, reason: RemoteProtocol.secureChannelFailedReason)
                 return
             }
         } else {
@@ -832,7 +900,7 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private static func signaturePayload(token: String, deviceID: String, ephemeralPublicKey: Data) -> Data {
         var payload = Data()
-        payload.append(contentsOf: Data("iMote.e2e.handshake.v1|".utf8))
+        payload.append(contentsOf: Data("iMote.e2e.handshake.v2|".utf8))
         payload.append(contentsOf: Data(token.utf8))
         payload.append(contentsOf: Data("|".utf8))
         payload.append(contentsOf: Data(deviceID.utf8))

@@ -42,6 +42,10 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private var audioDebugReceivedFrameCount = 0
     private var controlChannelKey: SymmetricKey?
     private var mediaChannelKey: SymmetricKey?
+    private var clientToHostControlCounter: UInt64 = 0
+    private var hostToClientControlCounter: UInt64 = 0
+    private var hostToClientMediaCounter: UInt64 = 0
+    private var pendingDisconnectReason: String?
     private var localSigningPrivateKey = IOSWebSocketClient.loadOrCreateSigningPrivateKey()
     private var handshakeEphemeralPrivateKey: Curve25519.KeyAgreement.PrivateKey?
     private var pendingHostDeviceID: String?
@@ -98,6 +102,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         pairedToken = nil
         controlChannelKey = nil
         mediaChannelKey = nil
+        resetSecureCounters()
         handshakeEphemeralPrivateKey = nil
         pendingHostDeviceID = nil
         hasCompletedSecureHandshake = false
@@ -166,11 +171,15 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                     return
                 }
                 let plaintext = try RemoteProtocolCodec.encode(message)
-                let sealedBox = try ChaChaPoly.seal(plaintext, using: key)
-                outboundMessage = .secureControl(
-                    payloadBase64: sealedBox.combined.base64EncodedString(),
-                    token: pairedToken
+                let combined = try SecureChannelCodec.seal(
+                    plaintext,
+                    using: key,
+                    kind: .control,
+                    direction: .clientToHost,
+                    counter: clientToHostControlCounter
                 )
+                clientToHostControlCounter += 1
+                outboundMessage = .secureControl(payloadBase64: combined.base64EncodedString())
             } else {
                 outboundMessage = message
             }
@@ -246,12 +255,19 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                 }
             case .error:
                 let reason = decoded.reason ?? "Unknown error"
-                onRemoteError?(reason)
                 if hasCompletedSecureHandshake == false {
                     shouldReconnect = false
+                    onRemoteError?(reason)
                     state = .failed(reason)
                     task?.cancel(with: .normalClosure, reason: nil)
+                } else if reason == RemoteProtocol.secureChannelFailedReason {
+                    pendingDisconnectReason = reason
+                    task?.cancel(with: .normalClosure, reason: nil)
+                } else {
+                    onRemoteError?(reason)
                 }
+            case .secureControl:
+                handleIncomingSecureControl(decoded)
             case .e2eHelloAck:
                 handleSecureHelloAck(decoded)
             case .screenFrame:
@@ -260,15 +276,18 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                     onScreenFrame?(frameData)
                 }
             case .cursorPosition:
+                guard hasCompletedSecureHandshake == false else { break }
                 if let x = decoded.cursorX, let y = decoded.cursorY {
                     onCursorPosition?(x, y)
                 }
             case .pong:
                 break
             case .streamStatus:
+                guard hasCompletedSecureHandshake == false else { break }
                 onThermalOverrideChanged?(decoded.thermalOverrideActive ?? false)
                 onHostCaptureStatusChanged?(decoded.captureRoute, decoded.hostDisplayCount, decoded.previewCaptureActive)
             case .permissionStatus:
+                guard hasCompletedSecureHandshake == false else { break }
                 onPermissionStatus?(decoded.accessibilityGranted ?? false, decoded.screenRecordingGranted ?? false)
             default:
                 break
@@ -285,13 +304,20 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         guard let marker = data.first, data.count > 1 else { return false }
         if marker == BinaryPacketMarker.encryptedMedia {
             guard let mediaChannelKey else { return false }
-            let combined = data.dropFirst()
+            let combined = Data(data.dropFirst())
             do {
-                let sealedBox = try ChaChaPoly.SealedBox(combined: combined)
-                let plaintext = try ChaChaPoly.open(sealedBox, using: mediaChannelKey)
+                let plaintext = try SecureChannelCodec.open(
+                    combined: combined,
+                    using: mediaChannelKey,
+                    kind: .media,
+                    direction: .hostToClient,
+                    counter: hostToClientMediaCounter
+                )
+                hostToClientMediaCounter += 1
                 return handleBinaryVideoPacket(plaintext)
             } catch {
-                handleError("Unable to decrypt media payload")
+                pendingDisconnectReason = RemoteProtocol.secureChannelFailedReason
+                task?.cancel(with: .normalClosure, reason: nil)
                 return true
             }
         }
@@ -353,11 +379,16 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         pairedToken = nil
         controlChannelKey = nil
         mediaChannelKey = nil
+        resetSecureCounters()
         handshakeEphemeralPrivateKey = nil
         pendingHostDeviceID = nil
         hasCompletedSecureHandshake = false
+        let channelReason = pendingDisconnectReason
+        pendingDisconnectReason = nil
 
-        if let error {
+        if let channelReason {
+            state = .failed(channelReason)
+        } else if let error {
             state = .failed(error.localizedDescription)
         } else {
             state = .disconnected
@@ -391,10 +422,73 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
              .audioConfig,
              .permissionStatusRequest,
              .permissionAction,
-             .trustControl:
+             .trustControl,
+             .ping:
             return true
         default:
             return false
+        }
+    }
+
+    private func resetSecureCounters() {
+        clientToHostControlCounter = 0
+        hostToClientControlCounter = 0
+        hostToClientMediaCounter = 0
+    }
+
+    private func handleIncomingSecureControl(_ message: RemoteMessage) {
+        guard hasCompletedSecureHandshake, let key = controlChannelKey else {
+            pendingDisconnectReason = RemoteProtocol.secureChannelFailedReason
+            task?.cancel(with: .normalClosure, reason: nil)
+            return
+        }
+        guard let payloadBase64 = message.securePayload,
+              let combined = Data(base64Encoded: payloadBase64) else {
+            pendingDisconnectReason = RemoteProtocol.secureChannelFailedReason
+            task?.cancel(with: .normalClosure, reason: nil)
+            return
+        }
+        do {
+            let plaintext = try SecureChannelCodec.open(
+                combined: combined,
+                using: key,
+                kind: .control,
+                direction: .hostToClient,
+                counter: hostToClientControlCounter
+            )
+            hostToClientControlCounter += 1
+            let inner = try RemoteProtocolCodec.decode(plaintext)
+            guard inner.type != .secureControl else { return }
+            dispatchDecryptedControl(inner)
+        } catch {
+            pendingDisconnectReason = RemoteProtocol.secureChannelFailedReason
+            task?.cancel(with: .normalClosure, reason: nil)
+        }
+    }
+
+    private func dispatchDecryptedControl(_ decoded: RemoteMessage) {
+        switch decoded.type {
+        case .error:
+            let reason = decoded.reason ?? "Unknown error"
+            if reason == RemoteProtocol.secureChannelFailedReason {
+                pendingDisconnectReason = reason
+                task?.cancel(with: .normalClosure, reason: nil)
+            } else {
+                onRemoteError?(reason)
+            }
+        case .cursorPosition:
+            if let x = decoded.cursorX, let y = decoded.cursorY {
+                onCursorPosition?(x, y)
+            }
+        case .pong:
+            break
+        case .streamStatus:
+            onThermalOverrideChanged?(decoded.thermalOverrideActive ?? false)
+            onHostCaptureStatusChanged?(decoded.captureRoute, decoded.hostDisplayCount, decoded.previewCaptureActive)
+        case .permissionStatus:
+            onPermissionStatus?(decoded.accessibilityGranted ?? false, decoded.screenRecordingGranted ?? false)
+        default:
+            break
         }
     }
 
@@ -470,13 +564,13 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             controlChannelKey = sharedSecret.hkdfDerivedSymmetricKey(
                 using: SHA256.self,
                 salt: salt,
-                sharedInfo: Data("iMote.e2e.control.v1".utf8),
+                sharedInfo: Data("iMote.e2e.control.v2".utf8),
                 outputByteCount: 32
             )
             mediaChannelKey = sharedSecret.hkdfDerivedSymmetricKey(
                 using: SHA256.self,
                 salt: salt,
-                sharedInfo: Data("iMote.e2e.media.v1".utf8),
+                sharedInfo: Data("iMote.e2e.media.v2".utf8),
                 outputByteCount: 32
             )
             hasCompletedSecureHandshake = true
@@ -502,7 +596,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
 
     private static func signaturePayload(token: String, deviceID: String, ephemeralPublicKey: Data) -> Data {
         var payload = Data()
-        payload.append(contentsOf: Data("iMote.e2e.handshake.v1|".utf8))
+        payload.append(contentsOf: Data("iMote.e2e.handshake.v2|".utf8))
         payload.append(contentsOf: Data(token.utf8))
         payload.append(contentsOf: Data("|".utf8))
         payload.append(contentsOf: Data(deviceID.utf8))

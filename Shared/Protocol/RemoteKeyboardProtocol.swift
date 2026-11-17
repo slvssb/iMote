@@ -207,8 +207,8 @@ public struct RemoteMessage: Codable, Sendable {
         )
     }
 
-    public static func secureControl(payloadBase64: String, token: String?) -> RemoteMessage {
-        RemoteMessage(type: .secureControl, token: token, securePayload: payloadBase64)
+    public static func secureControl(payloadBase64: String) -> RemoteMessage {
+        RemoteMessage(type: .secureControl, securePayload: payloadBase64)
     }
 
     public static func e2eHello(
