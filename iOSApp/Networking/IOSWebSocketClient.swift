@@ -224,6 +224,12 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         if let decoded = try? RemoteProtocolCodec.decode(data) {
             switch decoded.type {
             case .pairAck:
+                guard decoded.protocolVersion == RemoteProtocol.version else {
+                    shouldReconnect = false
+                    state = .failed(RemoteProtocol.incompatibleHostReason)
+                    task?.cancel(with: .normalClosure, reason: nil)
+                    break
+                }
                 if decoded.success == true, let token = decoded.token {
                     pairedToken = token
                     pendingHostDeviceID = decoded.deviceID
@@ -414,6 +420,12 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     }
 
     private func handleSecureHelloAck(_ message: RemoteMessage) {
+        guard message.protocolVersion == RemoteProtocol.version else {
+            shouldReconnect = false
+            handleError(RemoteProtocol.incompatibleHostReason)
+            task?.cancel(with: .normalClosure, reason: nil)
+            return
+        }
         guard let token = pairedToken,
               let hostDeviceID = message.deviceID,
               let hostSigningPublicKeyBase64 = message.signingPublicKey,

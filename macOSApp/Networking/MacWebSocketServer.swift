@@ -448,13 +448,15 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func handlePair(_ message: RemoteMessage, from id: UUID) {
+        guard message.protocolVersion == RemoteProtocol.version else {
+            send(.pairAck(success: false, token: nil, reason: RemoteProtocol.incompatibleClientReason), to: id)
+            return
+        }
+
         let submitted = message.code ?? ""
         let result = pairingManager.pair(code: submitted, deviceID: message.deviceID)
         guard var context = clients[id] else { return }
         if result.success, let token = result.token {
-            if let deviceID = message.deviceID, deviceID.isEmpty == false {
-                pairingManager.noteTrustedDevice(deviceID: deviceID, name: message.deviceName)
-            }
             context.token = token
             context.deviceName = message.deviceName
             context.secureSession = nil
@@ -469,6 +471,10 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func handleE2EHello(_ message: RemoteMessage, from id: UUID) {
+        guard message.protocolVersion == RemoteProtocol.version else {
+            send(.error(RemoteProtocol.incompatibleClientReason), to: id)
+            return
+        }
         guard authorize(id: id, token: message.token), let token = message.token else {
             send(.error("Unauthorized secure handshake"), to: id)
             return
@@ -484,6 +490,11 @@ final class MacWebSocketServer: @unchecked Sendable {
             return
         }
 
+        if let boundDeviceID = pairingManager.provisionalDeviceID(for: token), boundDeviceID != clientDeviceID {
+            send(.error("Handshake device does not match the paired device."), to: id)
+            return
+        }
+
         guard pairingManager.verifyOrPinSigningKey(deviceID: clientDeviceID, signingPublicKeyBase64: clientSigningKeyBase64) else {
             send(.error("Client identity key mismatch"), to: id)
             return
@@ -495,6 +506,14 @@ final class MacWebSocketServer: @unchecked Sendable {
             guard clientSigningKey.isValidSignature(signatureData, for: signaturePayload) else {
                 send(.error("Invalid secure handshake signature"), to: id)
                 return
+            }
+
+            guard pairingManager.confirmTrustedDeviceAfterHandshake(token: token, deviceID: clientDeviceID) else {
+                send(.error("Handshake device does not match the paired device."), to: id)
+                return
+            }
+            if let deviceName = clients[id]?.deviceName {
+                pairingManager.noteTrustedDevice(deviceID: clientDeviceID, name: deviceName)
             }
 
             let hostEphemeralPrivateKey = Curve25519.KeyAgreement.PrivateKey()
