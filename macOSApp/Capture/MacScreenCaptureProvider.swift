@@ -9,6 +9,11 @@ struct CapturedPixelBuffer: @unchecked Sendable {
     let value: CVPixelBuffer
 }
 
+enum CapturedAudioOrigin: Sendable {
+    case systemOutput
+    case microphone
+}
+
 struct CapturedAudioSampleBuffer: @unchecked Sendable {
     let value: CMSampleBuffer
 }
@@ -28,7 +33,7 @@ actor MacScreenCaptureProvider {
     private var latestPixelBuffer: CapturedPixelBuffer?
     private var activeMaxWidth: CGFloat = 0
     private var audioCaptureSource: AudioCaptureSource = .off
-    private var audioSampleHandler: ((CapturedAudioSampleBuffer) -> Void)?
+    private var audioSampleHandler: ((CapturedAudioSampleBuffer, CapturedAudioOrigin) -> Void)?
     private var activeCaptureRouteLabel: String = "Unknown"
     private var preferFallbackDisplay = false
     private var captureEnabled = true
@@ -113,7 +118,7 @@ actor MacScreenCaptureProvider {
         }
     }
 
-    func setAudioSampleHandler(_ handler: ((CapturedAudioSampleBuffer) -> Void)?) {
+    func setAudioSampleHandler(_ handler: ((CapturedAudioSampleBuffer, CapturedAudioOrigin) -> Void)?) {
         audioSampleHandler = handler
     }
 
@@ -224,8 +229,8 @@ actor MacScreenCaptureProvider {
         latestPixelBuffer = pixelBuffer
     }
 
-    fileprivate func consumeAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
-        audioSampleHandler?(sampleBuffer)
+    fileprivate func consumeAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer, origin: CapturedAudioOrigin) {
+        audioSampleHandler?(sampleBuffer, origin)
     }
 
     private func selectCaptureDisplay(from displays: [SCDisplay]) -> SCDisplay? {
@@ -292,10 +297,15 @@ private final class StreamOutput: NSObject, SCStreamOutput {
             Task {
                 await owner.consumeFrame(frame)
             }
-        case .audio, .microphone:
+        case .audio:
             let audioSample = CapturedAudioSampleBuffer(value: sampleBuffer)
             Task {
-                await owner.consumeAudioSampleBuffer(audioSample)
+                await owner.consumeAudioSampleBuffer(audioSample, origin: .systemOutput)
+            }
+        case .microphone:
+            let audioSample = CapturedAudioSampleBuffer(value: sampleBuffer)
+            Task {
+                await owner.consumeAudioSampleBuffer(audioSample, origin: .microphone)
             }
         @unknown default:
             return

@@ -161,8 +161,8 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         Task {
-            await screenCaptureProvider.setAudioSampleHandler { [weak self] sampleBuffer in
-                self?.handleAudioSampleBuffer(sampleBuffer)
+            await screenCaptureProvider.setAudioSampleHandler { [weak self] sampleBuffer, origin in
+                self?.handleAudioSampleBuffer(sampleBuffer, origin: origin)
             }
             await screenCaptureProvider.setAudioCaptureSource(self.selectedAudioCaptureSource)
         }
@@ -795,6 +795,7 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         guard let source = message.audioSource else { return }
         selectedAudioCaptureSource = source
+        aacEncoder.resetMix()
         Task {
             await screenCaptureProvider.setAudioCaptureSource(source)
         }
@@ -1398,7 +1399,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         publishMediaStatus()
     }
 
-    private func handleAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
+    private func handleAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer, origin: CapturedAudioOrigin) {
         queue.async { [weak self] in
             guard let self else { return }
             guard self.selectedAudioCaptureSource != .off else { return }
@@ -1406,7 +1407,11 @@ final class MacWebSocketServer: @unchecked Sendable {
                 context.token != nil
             }
             guard hasPairedClients else { return }
-            self.aacEncoder.encode(sampleBuffer: sampleBuffer.value)
+            if self.selectedAudioCaptureSource == .systemAndMicrophone {
+                self.aacEncoder.encodeMixed(sampleBuffer: sampleBuffer.value, origin: origin)
+            } else {
+                self.aacEncoder.encode(sampleBuffer: sampleBuffer.value)
+            }
         }
     }
 
