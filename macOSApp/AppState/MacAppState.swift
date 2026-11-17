@@ -56,22 +56,56 @@ final class MacAppState: ObservableObject {
     private let pathMonitorQueue = DispatchQueue(label: "imote.host.network-path")
     private var endpointRefreshTask: Task<Void, Never>?
     private var endpointRefreshGeneration = 0
+    private static let portDefaultsKey = "remoteKeyboard.host.listenerPort"
 
-    init(autoStart: Bool = true) {
+    init(autoStart: Bool = true, initialPort: UInt16? = nil) {
+        if let initialPort {
+            listenerPort = initialPort
+            UserDefaults.standard.set(Int(initialPort), forKey: Self.portDefaultsKey)
+        } else if let stored = UserDefaults.standard.object(forKey: Self.portDefaultsKey) as? Int,
+                  (1...65_535).contains(stored) {
+            listenerPort = UInt16(stored)
+        }
         bindServerCallbacks()
         refreshAccessibility(prompt: false)
+        startPairingTicker()
+        refreshPairingSnapshot()
+        startPathMonitor()
+        refreshStartOnLoginStatus()
         if autoStart {
             startServer()
-            startPairingTicker()
-            refreshPairingSnapshot()
-            startPathMonitor()
-            refreshReachableEndpoints()
         }
-        refreshStartOnLoginStatus()
     }
 
-    func startServer(port: UInt16 = 8989) {
-        listenerPort = port
+    func noteListenerPortDraft(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Int(trimmed), (1...65_535).contains(value) else { return }
+        guard isListenerRunning == false else { return }
+        listenerPort = UInt16(value)
+        UserDefaults.standard.set(value, forKey: Self.portDefaultsKey)
+    }
+
+    @discardableResult
+    func applyListenerPort(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isListenerRunning == false else {
+            lastError = "Stop the listener before changing the port."
+            return false
+        }
+        guard let value = Int(trimmed), (1...65_535).contains(value) else {
+            lastError = "Port must be between 1 and 65535."
+            return false
+        }
+        listenerPort = UInt16(value)
+        UserDefaults.standard.set(value, forKey: Self.portDefaultsKey)
+        if lastError == "Port must be between 1 and 65535." || lastError == "Stop the listener before changing the port." {
+            lastError = nil
+        }
+        return true
+    }
+
+    func startServer() {
+        let port = listenerPort
         do {
             try server.start(port: port)
             isListenerRunning = true

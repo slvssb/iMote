@@ -29,13 +29,27 @@ struct IMoteMacApp: App {
 
     private struct LaunchOptions {
         let cliMode: Bool
-        let port: UInt16
+        let explicitPort: UInt16?
         let showHelp: Bool
 
-        static func parse(_ args: [String]) -> LaunchOptions {
+        enum ParseError: Error, CustomStringConvertible {
+            case missingPortValue
+            case invalidPort(String)
+
+            var description: String {
+                switch self {
+                case .missingPortValue:
+                    return "--port needs a value from 1 to 65535."
+                case .invalidPort(let raw):
+                    return "--port \(raw) is not a port from 1 to 65535."
+                }
+            }
+        }
+
+        static func parse(_ args: [String]) throws -> LaunchOptions {
             var cliMode = false
             var showHelp = false
-            var port: UInt16 = 8989
+            var explicitPort: UInt16?
 
             var index = 1
             while index < args.count {
@@ -46,17 +60,22 @@ struct IMoteMacApp: App {
                 case "--help", "-h":
                     showHelp = true
                 case "--port":
-                    if index + 1 < args.count, let value = UInt16(args[index + 1]) {
-                        port = value
-                        index += 1
+                    guard index + 1 < args.count else {
+                        throw ParseError.missingPortValue
                     }
+                    let raw = args[index + 1]
+                    guard let value = UInt16(raw), (1...65_535).contains(Int(value)) else {
+                        throw ParseError.invalidPort(raw)
+                    }
+                    explicitPort = value
+                    index += 1
                 default:
                     break
                 }
                 index += 1
             }
 
-            return LaunchOptions(cliMode: cliMode, port: port, showHelp: showHelp)
+            return LaunchOptions(cliMode: cliMode, explicitPort: explicitPort, showHelp: showHelp)
         }
     }
 
@@ -65,16 +84,22 @@ struct IMoteMacApp: App {
     private let cliRunner: MacHostCLIRunner?
 
     init() {
-        let options = LaunchOptions.parse(CommandLine.arguments)
+        let options: LaunchOptions
+        do {
+            options = try LaunchOptions.parse(CommandLine.arguments)
+        } catch {
+            fputs("iMote Host: \(error)\n", stderr)
+            exit(64)
+        }
         self.launchOptions = options
+        let state = MacAppState(autoStart: options.cliMode == false, initialPort: options.explicitPort)
+        _appState = StateObject(wrappedValue: state)
         if options.cliMode {
-            _appState = StateObject(wrappedValue: MacAppState(autoStart: false))
-            let runner = MacHostCLIRunner(port: options.port)
+            let runner = MacHostCLIRunner(appState: state)
             self.cliRunner = runner
             runner.start(showHelp: options.showHelp)
             NSApplication.shared.setActivationPolicy(.prohibited)
         } else {
-            _appState = StateObject(wrappedValue: MacAppState())
             self.cliRunner = nil
         }
         appDelegate.suppressWindows = options.cliMode
@@ -107,23 +132,19 @@ struct IMoteMacApp: App {
     }
 }
 
+@MainActor
 private final class MacHostCLIRunner: NSObject {
-    private let port: UInt16
-    private let pairingManager = PairingManager()
-    private let permissionManager = AccessibilityPermissionManager()
-    private lazy var injector = KeyboardInjector(permissionManager: permissionManager)
-    private lazy var server = MacWebSocketServer(
-        pairingManager: pairingManager,
-        injector: injector,
-        accessibilityPermissionManager: permissionManager
-    )
+    private let appState: MacAppState
     private var pairingTicker: Timer?
     private var signalSources: [DispatchSourceSignal] = []
     private var lastPairCode: String = ""
     private var lastConnectedNames: [String] = []
+    private var lastStatus: String = ""
+    private var lastRuntimeError: String = ""
+    private var lastPinnedFingerprint: String = ""
 
-    init(port: UInt16) {
-        self.port = port
+    init(appState: MacAppState) {
+        self.appState = appState
         super.init()
     }
 
@@ -134,32 +155,28 @@ private final class MacHostCLIRunner: NSObject {
 
         print("[iMote] CLI mode enabled")
         print("[iMote] Host: \(Host.current().localizedName ?? "Unknown")")
-        print("[iMote] Port: \(port)")
-
-        let accessibilityGranted = permissionManager.request(prompt: false)
-        print("[iMote] Accessibility: \(accessibilityGranted ? "granted" : "not granted")")
-        if accessibilityGranted == false {
+        print("[iMote] Port: \(appState.listenerPort)")
+        print("[iMote] Accessibility: \(appState.accessibilityGranted ? "granted" : "not granted")")
+        if appState.accessibilityGranted == false {
             print("[iMote] Grant at System Settings > Privacy & Security > Accessibility")
         }
+        print("[iMote] This Mac fingerprint: \(appState.hostFingerprint)")
 
-        bindServerCallbacks()
         installSignalHandlers()
-        startPairingTicker()
-        printPairingSnapshot(force: true)
-
-        do {
-            try server.start(port: port)
-        } catch {
-            print("[iMote] Failed to start listener: \(error.localizedDescription)")
+        appState.startServer()
+        if appState.isListenerRunning == false {
+            print("[iMote] Failed to start listener: \(appState.lastError ?? "unknown error")")
             terminate(code: 1)
             return
         }
 
         printReachableEndpoints()
+        startPairingTicker()
+        printSnapshot(force: true)
     }
 
     private func printReachableEndpoints() {
-        let snapshot = HostEndpointCatalog.snapshot(port: port)
+        let snapshot = HostEndpointCatalog.snapshot(port: appState.listenerPort)
         if snapshot.endpoints.isEmpty {
             print("[iMote] Reachable addresses: none")
         } else {
@@ -179,36 +196,6 @@ private final class MacHostCLIRunner: NSObject {
         }
     }
 
-    private func bindServerCallbacks() {
-        server.onStateChange = { state in
-            print("[iMote] \(state)")
-        }
-
-        server.onClientsChange = { [weak self] clients in
-            guard let self else { return }
-            let names = clients.map { snapshot in
-                snapshot.deviceName ?? snapshot.id.uuidString.prefix(6).description
-            }
-            guard names != self.lastConnectedNames else { return }
-            self.lastConnectedNames = names
-            if names.isEmpty {
-                print("[iMote] Connected devices: none")
-            } else {
-                print("[iMote] Connected devices: \(names.joined(separator: ", "))")
-            }
-        }
-
-        server.onRuntimeError = { reason in
-            print("[iMote] Runtime error: \(reason)")
-        }
-
-        print("[iMote] This Mac fingerprint: \(server.localSigningFingerprint)")
-        server.onIdentityPinned = { fingerprint, isNew in
-            let label = isNew ? "New iPhone fingerprint" : "iPhone fingerprint"
-            print("[iMote] \(label): \(fingerprint)")
-        }
-    }
-
     private func startPairingTicker() {
         pairingTicker = Timer.scheduledTimer(
             timeInterval: 1,
@@ -220,15 +207,41 @@ private final class MacHostCLIRunner: NSObject {
     }
 
     @objc private func handlePairingTick() {
-        printPairingSnapshot(force: false)
+        printSnapshot(force: false)
     }
 
-    private func printPairingSnapshot(force: Bool) {
-        let snapshot = pairingManager.snapshot()
-        let remaining = max(0, Int(snapshot.expiresAt.timeIntervalSinceNow.rounded(.down)))
-        if force || snapshot.code != lastPairCode || remaining % 15 == 0 {
-            lastPairCode = snapshot.code
-            print("[iMote] Pairing code: \(snapshot.code) (expires in \(remaining)s)")
+    private func printSnapshot(force: Bool) {
+        let code = appState.pairingCode
+        let remaining = appState.pairingSecondsRemaining
+        if force || code != lastPairCode || remaining % 15 == 0 {
+            lastPairCode = code
+            print("[iMote] Pairing code: \(code) (expires in \(remaining)s)")
+        }
+
+        if appState.serverStatus != lastStatus {
+            lastStatus = appState.serverStatus
+            print("[iMote] \(appState.serverStatus)")
+        }
+
+        let names = appState.connectedPhones.map(\.name)
+        if names != lastConnectedNames {
+            lastConnectedNames = names
+            if names.isEmpty {
+                print("[iMote] Connected devices: none")
+            } else {
+                print("[iMote] Connected devices: \(names.joined(separator: ", "))")
+            }
+        }
+
+        if let fingerprint = appState.lastPinnedFingerprint, fingerprint != lastPinnedFingerprint {
+            lastPinnedFingerprint = fingerprint
+            let label = appState.lastPinnedFingerprintIsNew ? "New iPhone fingerprint" : "iPhone fingerprint"
+            print("[iMote] \(label): \(fingerprint)")
+        }
+
+        if let error = appState.lastError, error.isEmpty == false, error != lastRuntimeError {
+            lastRuntimeError = error
+            print("[iMote] Runtime error: \(error)")
         }
     }
 
@@ -238,14 +251,18 @@ private final class MacHostCLIRunner: NSObject {
 
         let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         sigint.setEventHandler { [weak self] in
-            self?.terminate(code: 0)
+            Task { @MainActor in
+                self?.terminate(code: 0)
+            }
         }
         sigint.resume()
         signalSources.append(sigint)
 
         let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         sigterm.setEventHandler { [weak self] in
-            self?.terminate(code: 0)
+            Task { @MainActor in
+                self?.terminate(code: 0)
+            }
         }
         sigterm.resume()
         signalSources.append(sigterm)
@@ -254,7 +271,7 @@ private final class MacHostCLIRunner: NSObject {
     private func terminate(code: Int32) {
         pairingTicker?.invalidate()
         pairingTicker = nil
-        server.stop()
+        appState.stopServer()
         print("[iMote] Shutting down")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             exit(code)
@@ -268,8 +285,11 @@ private final class MacHostCLIRunner: NSObject {
 
         Flags:
           --cli      Run host listener in terminal/headless mode
-          --port     Listener port (default: 8989)
+          --port     Listener port from 1 to 65535 (default: 8989)
           --help     Print this help
+
+        A missing or non-numeric --port exits instead of listening on 8989.
+        --cli uses the same listener and pairing code as the host window.
 
         Prints listener state, the pairing code, permissions, LAN and Tailscale addresses, and connected devices.
         """)

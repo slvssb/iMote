@@ -9,6 +9,11 @@ struct CapturedPixelBuffer: @unchecked Sendable {
     let value: CVPixelBuffer
 }
 
+enum CapturedAudioOrigin: Sendable {
+    case systemOutput
+    case microphone
+}
+
 struct CapturedAudioSampleBuffer: @unchecked Sendable {
     let value: CMSampleBuffer
 }
@@ -28,7 +33,7 @@ actor MacScreenCaptureProvider {
     private var latestPixelBuffer: CapturedPixelBuffer?
     private var activeMaxWidth: CGFloat = 0
     private var audioCaptureSource: AudioCaptureSource = .off
-    private var audioSampleHandler: ((CapturedAudioSampleBuffer) -> Void)?
+    private var audioSampleHandler: ((CapturedAudioSampleBuffer, CapturedAudioOrigin) -> Void)?
     private var activeCaptureRouteLabel: String = "Unknown"
     private var preferFallbackDisplay = false
     private var captureEnabled = true
@@ -113,16 +118,17 @@ actor MacScreenCaptureProvider {
         }
     }
 
-    func setAudioSampleHandler(_ handler: ((CapturedAudioSampleBuffer) -> Void)?) {
+    func setAudioSampleHandler(_ handler: ((CapturedAudioSampleBuffer, CapturedAudioOrigin) -> Void)?) {
         audioSampleHandler = handler
     }
 
-    func normalizedCursorPosition() -> CGPoint? {
-        guard displayFrame.isEmpty == false else { return nil }
+    func normalizedCursorPosition() async -> CGPoint? {
+        let frame = displayFrame
+        guard frame.isEmpty == false else { return nil }
 
-        let location = NSEvent.mouseLocation
-        let relativeX = (location.x - displayFrame.minX) / displayFrame.width
-        let relativeY = (location.y - displayFrame.minY) / displayFrame.height
+        let location = await MainActor.run { NSEvent.mouseLocation }
+        let relativeX = (location.x - frame.minX) / frame.width
+        let relativeY = (location.y - frame.minY) / frame.height
 
         let clampedX = min(max(relativeX, 0), 1)
         let clampedY = min(max(1 - relativeY, 0), 1)
@@ -223,8 +229,8 @@ actor MacScreenCaptureProvider {
         latestPixelBuffer = pixelBuffer
     }
 
-    fileprivate func consumeAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
-        audioSampleHandler?(sampleBuffer)
+    fileprivate func consumeAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer, origin: CapturedAudioOrigin) {
+        audioSampleHandler?(sampleBuffer, origin)
     }
 
     private func selectCaptureDisplay(from displays: [SCDisplay]) -> SCDisplay? {
@@ -291,10 +297,15 @@ private final class StreamOutput: NSObject, SCStreamOutput {
             Task {
                 await owner.consumeFrame(frame)
             }
-        case .audio, .microphone:
+        case .audio:
             let audioSample = CapturedAudioSampleBuffer(value: sampleBuffer)
             Task {
-                await owner.consumeAudioSampleBuffer(audioSample)
+                await owner.consumeAudioSampleBuffer(audioSample, origin: .systemOutput)
+            }
+        case .microphone:
+            let audioSample = CapturedAudioSampleBuffer(value: sampleBuffer)
+            Task {
+                await owner.consumeAudioSampleBuffer(audioSample, origin: .microphone)
             }
         @unknown default:
             return

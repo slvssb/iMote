@@ -192,10 +192,22 @@ final class H264FrameDecoder {
     private func markFrameDecodeStart(index: Int64) {
         decodeStateLock.lock()
         decodeStartByFrameIndex[index] = CFAbsoluteTimeGetCurrent()
+        if decodeStartByFrameIndex.count > 8 {
+            let stale = decodeStartByFrameIndex.keys.filter { $0 < index - 8 }
+            for key in stale {
+                decodeStartByFrameIndex.removeValue(forKey: key)
+            }
+        }
+        if decodeStartByFrameIndex.count > 16 {
+            let overflow = decodeStartByFrameIndex.keys.sorted().dropLast(8)
+            for key in overflow {
+                decodeStartByFrameIndex.removeValue(forKey: key)
+            }
+        }
         decodeStateLock.unlock()
     }
 
-    private func clearFrameDecodeStart(index: Int64) {
+    fileprivate func clearFrameDecodeStart(index: Int64) {
         decodeStateLock.lock()
         decodeStartByFrameIndex.removeValue(forKey: index)
         decodeStateLock.unlock()
@@ -211,9 +223,12 @@ final class H264FrameDecoder {
 }
 
 private let decompressionOutputCallback: VTDecompressionOutputCallback = { refCon, _, status, _, imageBuffer, presentationTimeStamp, _ in
-    guard status == noErr,
-          let refCon,
-          let imageBuffer else {
+    guard let refCon else { return }
+    let decoder = Unmanaged<H264FrameDecoder>.fromOpaque(refCon).takeUnretainedValue()
+    guard status == noErr, let imageBuffer else {
+        if presentationTimeStamp.isValid {
+            decoder.clearFrameDecodeStart(index: presentationTimeStamp.value)
+        }
         return
     }
 
@@ -225,6 +240,9 @@ private let decompressionOutputCallback: VTDecompressionOutputCallback = { refCo
     )
     guard formatStatus == noErr,
           let formatDescription else {
+        if presentationTimeStamp.isValid {
+            decoder.clearFrameDecodeStart(index: presentationTimeStamp.value)
+        }
         return
     }
 
@@ -250,6 +268,9 @@ private let decompressionOutputCallback: VTDecompressionOutputCallback = { refCo
     )
     guard sampleStatus == noErr,
           let outputSampleBuffer else {
+        if presentationTimeStamp.isValid {
+            decoder.clearFrameDecodeStart(index: presentationTimeStamp.value)
+        }
         return
     }
 
@@ -264,7 +285,6 @@ private let decompressionOutputCallback: VTDecompressionOutputCallback = { refCo
         )
     }
 
-    let decoder = Unmanaged<H264FrameDecoder>.fromOpaque(refCon).takeUnretainedValue()
     let outputFrameIndex = presentationTimeStamp.isValid ? presentationTimeStamp.value : nil
     decoder.emitSampleBuffer(outputSampleBuffer, frameIndex: outputFrameIndex)
 }

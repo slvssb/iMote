@@ -28,7 +28,6 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case permissionStatusRequest
     case permissionStatus
     case permissionAction
-    case screenFrame
     case ping
     case pong
     case error
@@ -102,7 +101,6 @@ public struct RemoteMessage: Codable, Sendable {
     public var captureRoute: String?
     public var hostDisplayCount: Int?
     public var previewCaptureActive: Bool?
-    public var frameBase64: String?
     public var audioSource: AudioCaptureSource?
     public var permissionAction: HostPermissionAction?
     public var accessibilityGranted: Bool?
@@ -139,7 +137,6 @@ public struct RemoteMessage: Codable, Sendable {
         captureRoute: String? = nil,
         hostDisplayCount: Int? = nil,
         previewCaptureActive: Bool? = nil,
-        frameBase64: String? = nil,
         audioSource: AudioCaptureSource? = nil,
         permissionAction: HostPermissionAction? = nil,
         accessibilityGranted: Bool? = nil,
@@ -175,7 +172,6 @@ public struct RemoteMessage: Codable, Sendable {
         self.captureRoute = captureRoute
         self.hostDisplayCount = hostDisplayCount
         self.previewCaptureActive = previewCaptureActive
-        self.frameBase64 = frameBase64
         self.audioSource = audioSource
         self.permissionAction = permissionAction
         self.accessibilityGranted = accessibilityGranted
@@ -320,10 +316,6 @@ public struct RemoteMessage: Codable, Sendable {
 
     public static func audioConfig(source: AudioCaptureSource, token: String?) -> RemoteMessage {
         RemoteMessage(type: .audioConfig, token: token, audioSource: source)
-    }
-
-    public static func screenFrame(frameBase64: String) -> RemoteMessage {
-        RemoteMessage(type: .screenFrame, frameBase64: frameBase64)
     }
 
     public static func permissionStatusRequest(token: String?) -> RemoteMessage {

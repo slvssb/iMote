@@ -22,6 +22,7 @@ final class AACAudioEncoder: @unchecked Sendable {
     private var stagedFrames: AVAudioFrameCount = 0
     private var didSendConfig = false
     private var pendingConfigEmission = false
+    private let systemMicMixer = SystemMicrophoneMixer()
 
     private let targetSampleRate: Double = 48_000
     private let targetChannels: AVAudioChannelCount = 2
@@ -32,6 +33,22 @@ final class AACAudioEncoder: @unchecked Sendable {
         let wrapped = SendableSampleBuffer(value: sampleBuffer)
         queue.async {
             self.encodeInternal(wrapped.value)
+        }
+    }
+
+    func encodeMixed(sampleBuffer: CMSampleBuffer, origin: CapturedAudioOrigin) {
+        let wrapped = SendableSampleBuffer(value: sampleBuffer)
+        queue.async {
+            guard let normalized = self.normalizedBuffer(from: wrapped.value) else { return }
+            for mixed in self.systemMicMixer.push(normalized, origin: origin) {
+                self.appendAndDrain(mixed)
+            }
+        }
+    }
+
+    func resetMix() {
+        queue.async {
+            self.systemMicMixer.reset()
         }
     }
 
@@ -48,10 +65,15 @@ final class AACAudioEncoder: @unchecked Sendable {
     }
 
     private func encodeInternal(_ sampleBuffer: CMSampleBuffer) {
+        guard let normalized = normalizedBuffer(from: sampleBuffer) else { return }
+        appendAndDrain(normalized)
+    }
+
+    private func normalizedBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription),
               let sourceFormat = AVAudioFormat(streamDescription: asbdPointer) else {
-            return
+            return nil
         }
 
         if normalizer == nil || inputFormat?.sampleRate != sourceFormat.sampleRate || inputFormat?.channelCount != sourceFormat.channelCount {
@@ -61,12 +83,12 @@ final class AACAudioEncoder: @unchecked Sendable {
         guard let normalizer,
               let normalizedFormat,
               let sourcePCM = makeSourcePCMBuffer(from: sampleBuffer, sourceFormat: sourceFormat) else {
-            return
+            return nil
         }
 
         let capacity = max(sourcePCM.frameLength, aacFrameCount)
         guard let normalized = AVAudioPCMBuffer(pcmFormat: normalizedFormat, frameCapacity: capacity) else {
-            return
+            return nil
         }
 
         var convertError: NSError?
@@ -80,8 +102,8 @@ final class AACAudioEncoder: @unchecked Sendable {
             status.pointee = .haveData
             return sourcePCM
         }
-        guard convertError == nil, feed.didFeed, normalized.frameLength > 0 else { return }
-        appendAndDrain(normalized)
+        guard convertError == nil, feed.didFeed, normalized.frameLength > 0 else { return nil }
+        return normalized
     }
 
     private func recreateConverter(sourceFormat: AVAudioFormat) {
@@ -127,6 +149,7 @@ final class AACAudioEncoder: @unchecked Sendable {
         stagedFrames = 0
         didSendConfig = false
         pendingConfigEmission = false
+        systemMicMixer.reset()
     }
 
     private func appendAndDrain(_ buffer: AVAudioPCMBuffer) {
@@ -283,6 +306,108 @@ final class AACAudioEncoder: @unchecked Sendable {
         )
         guard status == noErr else { return nil }
         return pcmBuffer
+    }
+}
+
+private final class SystemMicrophoneMixer {
+    private var systemSamples: [Float] = []
+    private var microphoneSamples: [Float] = []
+    private let channels = 2
+    private let emitFrames = 1024
+    private let maxLeadFrames = 4_800
+
+    func reset() {
+        systemSamples.removeAll(keepingCapacity: true)
+        microphoneSamples.removeAll(keepingCapacity: true)
+    }
+
+    func push(_ buffer: AVAudioPCMBuffer, origin: CapturedAudioOrigin) -> [AVAudioPCMBuffer] {
+        guard let interleaved = interleavedStereo(from: buffer) else { return [] }
+        switch origin {
+        case .systemOutput:
+            systemSamples.append(contentsOf: interleaved)
+        case .microphone:
+            microphoneSamples.append(contentsOf: interleaved)
+        }
+        return drain(format: buffer.format)
+    }
+
+    private func drain(format: AVAudioFormat) -> [AVAudioPCMBuffer] {
+        var emitted: [AVAudioPCMBuffer] = []
+        var guardrail = 0
+        while guardrail < 8 {
+            guardrail += 1
+            let systemFrames = systemSamples.count / channels
+            let microphoneFrames = microphoneSamples.count / channels
+            if min(systemFrames, microphoneFrames) >= emitFrames {
+                guard let mixed = mix(frameCount: emitFrames, format: format) else { break }
+                emitted.append(mixed)
+                continue
+            }
+            let lead = abs(systemFrames - microphoneFrames)
+            if lead >= maxLeadFrames, max(systemFrames, microphoneFrames) > 0 {
+                let fill = min(emitFrames, lead)
+                let zeros = [Float](repeating: 0, count: fill * channels)
+                if systemFrames < microphoneFrames {
+                    systemSamples.append(contentsOf: zeros)
+                } else {
+                    microphoneSamples.append(contentsOf: zeros)
+                }
+                continue
+            }
+            break
+        }
+        let cap = 48_000 * 2 * channels
+        if systemSamples.count > cap {
+            systemSamples.removeFirst(systemSamples.count - cap)
+        }
+        if microphoneSamples.count > cap {
+            microphoneSamples.removeFirst(microphoneSamples.count - cap)
+        }
+        return emitted
+    }
+
+    private func mix(frameCount: Int, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let sampleCount = frameCount * channels
+        guard systemSamples.count >= sampleCount, microphoneSamples.count >= sampleCount else { return nil }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)),
+              let channelData = buffer.floatChannelData else {
+            return nil
+        }
+        let channelCount = min(Int(format.channelCount), channels)
+        for frame in 0..<frameCount {
+            for channel in 0..<channelCount {
+                let index = frame * channels + channel
+                let mixed = systemSamples[index] + microphoneSamples[index]
+                channelData[channel][frame] = max(-1, min(1, mixed))
+            }
+        }
+        buffer.frameLength = AVAudioFrameCount(frameCount)
+        systemSamples.removeFirst(sampleCount)
+        microphoneSamples.removeFirst(sampleCount)
+        return buffer
+    }
+
+    private func interleavedStereo(from buffer: AVAudioPCMBuffer) -> [Float]? {
+        guard let source = buffer.floatChannelData else { return nil }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return nil }
+        var output: [Float] = []
+        output.reserveCapacity(frames * channels)
+        let sourceChannels = Int(buffer.format.channelCount)
+        if sourceChannels <= 1 {
+            for frame in 0..<frames {
+                let sample = source[0][frame]
+                output.append(sample)
+                output.append(sample)
+            }
+        } else {
+            for frame in 0..<frames {
+                output.append(source[0][frame])
+                output.append(source[1][frame])
+            }
+        }
+        return output
     }
 }
 

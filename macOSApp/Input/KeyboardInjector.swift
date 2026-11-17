@@ -28,7 +28,7 @@ final class KeyboardInjector {
     private var lastMouseTapLocation: CGPoint = .zero
     private var lastMouseTapButton: MouseButton?
     private var lastMouseTapClickCount: Int64 = 0
-    private var pressedMouseButtons: Set<MouseButton> = []
+    private var pressedMouseButtons: [MouseButton: UUID] = [:]
     private var controlArrowSource: CGEventSource?
 
     init(permissionManager: AccessibilityPermissionManager) {
@@ -107,7 +107,7 @@ final class KeyboardInjector {
         moveEvent.post(tap: .cghidEventTap)
     }
 
-    func injectMouseClick(button: MouseButton, modifiers: [RemoteModifier] = [], action: KeyAction) throws {
+    func injectMouseClick(button: MouseButton, modifiers: [RemoteModifier] = [], action: KeyAction, clientID: UUID) throws {
         if permissionManager.isTrusted() == false {
             throw KeyboardInjectorError.accessibilityPermissionMissing
         }
@@ -139,7 +139,7 @@ final class KeyboardInjector {
 
         switch action {
         case .down:
-            pressedMouseButtons.insert(button)
+            pressedMouseButtons[button] = clientID
             try postMouseEvent(
                 source: eventSource,
                 type: downType,
@@ -149,7 +149,7 @@ final class KeyboardInjector {
                 flags: mapper.eventFlags(for: modifiers)
             )
         case .up:
-            pressedMouseButtons.remove(button)
+            pressedMouseButtons.removeValue(forKey: button)
             try postMouseEvent(
                 source: eventSource,
                 type: upType,
@@ -176,6 +176,33 @@ final class KeyboardInjector {
                 button: mappedButton,
                 clickState: clickState,
                 flags: flags
+            )
+        }
+    }
+
+    /// Posts a button-up for every button this client left down. A dropped up, or a phone that sleeps mid-drag, would otherwise leave the Mac dragging.
+    func releasePressedMouseButtons(for clientID: UUID) {
+        let held = pressedMouseButtons.compactMap { button, owner in
+            owner == clientID ? button : nil
+        }
+        guard held.isEmpty == false else { return }
+        for button in held {
+            pressedMouseButtons.removeValue(forKey: button)
+        }
+        guard permissionManager.isTrusted(),
+              let eventSource = CGEventSource(stateID: .combinedSessionState),
+              let currentEvent = CGEvent(source: eventSource) else {
+            return
+        }
+        let point = currentEvent.location
+        for button in held {
+            guard let mapped = mouseEventTypes(for: button) else { continue }
+            try? postMouseEvent(
+                source: eventSource,
+                type: mapped.up,
+                point: point,
+                button: mapped.button,
+                clickState: 1
             )
         }
     }
@@ -208,7 +235,7 @@ final class KeyboardInjector {
         keyCode: CGKeyCode,
         keyDown: Bool,
         flags: CGEventFlags,
-        tap: CGEventTapLocation = .cgSessionEventTap
+        tap: CGEventTapLocation = .cghidEventTap
     ) throws {
         try postKeyEvent(
             keyCode: keyCode,
@@ -279,6 +306,17 @@ final class KeyboardInjector {
         let deviceLeftControl = CGEventFlags(rawValue: 0x00000001)
         let controlHeld: CGEventFlags = [.maskControl, .maskNonCoalesced, deviceLeftControl]
         let released: CGEventFlags = [.maskNonCoalesced]
+        var controlIsDown = false
+        defer {
+            if controlIsDown {
+                postControlRelease(
+                    source: source,
+                    controlKeyCode: controlKeyCode,
+                    keyboardType: kbdType,
+                    flags: released
+                )
+            }
+        }
 
         guard let clearFlags = CGEvent(keyboardEventSource: source, virtualKey: controlKeyCode, keyDown: false) else {
             throw KeyboardInjectorError.eventBuildFailed
@@ -287,7 +325,6 @@ final class KeyboardInjector {
         clearFlags.flags = released
         clearFlags.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
         clearFlags.post(tap: .cghidEventTap)
-        usleep(3000)
 
         guard let ctrlDown = CGEvent(keyboardEventSource: source, virtualKey: controlKeyCode, keyDown: true) else {
             throw KeyboardInjectorError.eventBuildFailed
@@ -296,7 +333,7 @@ final class KeyboardInjector {
         ctrlDown.flags = controlHeld
         ctrlDown.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
         ctrlDown.post(tap: .cghidEventTap)
-        usleep(2000)
+        controlIsDown = true
 
         guard let arrowDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true) else {
             throw KeyboardInjectorError.eventBuildFailed
@@ -304,7 +341,6 @@ final class KeyboardInjector {
         arrowDown.flags = controlHeld
         arrowDown.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
         arrowDown.post(tap: .cghidEventTap)
-        usleep(2000)
 
         guard let arrowUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
             throw KeyboardInjectorError.eventBuildFailed
@@ -312,14 +348,28 @@ final class KeyboardInjector {
         arrowUp.flags = controlHeld
         arrowUp.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
         arrowUp.post(tap: .cghidEventTap)
-        usleep(50000)
 
+        postControlRelease(
+            source: source,
+            controlKeyCode: controlKeyCode,
+            keyboardType: kbdType,
+            flags: released
+        )
+        controlIsDown = false
+    }
+
+    private func postControlRelease(
+        source: CGEventSource,
+        controlKeyCode: CGKeyCode,
+        keyboardType: Int64,
+        flags: CGEventFlags
+    ) {
         guard let ctrlUp = CGEvent(keyboardEventSource: source, virtualKey: controlKeyCode, keyDown: false) else {
-            throw KeyboardInjectorError.eventBuildFailed
+            return
         }
         ctrlUp.type = .flagsChanged
-        ctrlUp.flags = released
-        ctrlUp.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
+        ctrlUp.flags = flags
+        ctrlUp.setIntegerValueField(.keyboardEventKeyboardType, value: keyboardType)
         ctrlUp.post(tap: .cghidEventTap)
     }
 
@@ -380,29 +430,40 @@ final class KeyboardInjector {
     }
 
     private func mouseMoveEventTypeForPressedButtons() -> CGEventType {
-        if pressedMouseButtons.contains(.left) {
+        if pressedMouseButtons[.left] != nil {
             return .leftMouseDragged
         }
-        if pressedMouseButtons.contains(.right) {
+        if pressedMouseButtons[.right] != nil {
             return .rightMouseDragged
         }
-        if pressedMouseButtons.contains(.center) {
+        if pressedMouseButtons[.center] != nil {
             return .otherMouseDragged
         }
         return .mouseMoved
     }
 
     private func mouseButtonForPressedButtons() -> CGMouseButton {
-        if pressedMouseButtons.contains(.left) {
+        if pressedMouseButtons[.left] != nil {
             return .left
         }
-        if pressedMouseButtons.contains(.right) {
+        if pressedMouseButtons[.right] != nil {
             return .right
         }
-        if pressedMouseButtons.contains(.center) {
+        if pressedMouseButtons[.center] != nil {
             return .center
         }
         return .left
+    }
+
+    private func mouseEventTypes(for button: MouseButton) -> (button: CGMouseButton, down: CGEventType, up: CGEventType)? {
+        switch button {
+        case .left:
+            return (.left, .leftMouseDown, .leftMouseUp)
+        case .right:
+            return (.right, .rightMouseDown, .rightMouseUp)
+        case .center:
+            return (.center, .otherMouseDown, .otherMouseUp)
+        }
     }
 
     private func normalizedScrollDelta(_ value: Double) -> Int32 {
