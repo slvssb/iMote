@@ -533,9 +533,14 @@ final class IOSKeyboardViewModel: ObservableObject {
         pairedHostFingerprintIsNew = false
     }
 
-    func forgetCurrentDeviceTrustOnMac() {
-        client.sendForgetCurrentDeviceTrust()
-        forgetTrustedSessionOnPhone()
+    func forgetCurrentDeviceTrustOnMac() async -> Bool {
+        let sent = await client.sendForgetCurrentDeviceTrust()
+        if sent {
+            forgetTrustedSessionOnPhone()
+        } else if lastError == nil {
+            lastError = "Could not tell the Mac to forget this iPhone. Still connected."
+        }
+        return sent
     }
 
     func refreshHostPermissionStatus() {

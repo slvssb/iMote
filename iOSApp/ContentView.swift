@@ -1123,8 +1123,12 @@ private struct MacCenteredLogoOverlay: View {
             guard Task.isCancelled == false else { return }
 
             if shouldForgetOnControlledDisconnect {
-                viewModel.forgetCurrentDeviceTrustOnMac()
+                let forgot = await viewModel.forgetCurrentDeviceTrustOnMac()
                 shouldForgetOnControlledDisconnect = false
+                guard forgot, Task.isCancelled == false else {
+                    restoreConnectedControlsAfterFailedForget()
+                    return
+                }
             }
             if isControlledDisconnectFlow {
                 viewModel.disconnect()
@@ -1148,6 +1152,23 @@ private struct MacCenteredLogoOverlay: View {
                 connectionScreenOpacity = 1
             }
         }
+    }
+
+    private func restoreConnectedControlsAfterFailedForget() {
+        disconnectTask = nil
+        isDisconnectPreviewOverlayVisible = false
+        disconnectPreviewOverlayOpacity = 0
+        isDisconnectTransitionActive = false
+        isControlledDisconnectFlow = false
+        lockedDisconnectPreviewAspectRatio = nil
+        showConnectedLayout = true
+        connectedScreenOpacity = 1
+        connectionScreenOpacity = 0
+        isPreviewSectionVisible = true
+        isLivePreviewVisible = true
+        isStatsSectionVisible = true
+        isKeyboardSectionVisible = true
+        isTrackpadSectionVisible = true
     }
 
     private func cancelDisconnectSequence() {

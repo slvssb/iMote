@@ -149,8 +149,15 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(RemoteMessage.streamResync(token: pairedToken))
     }
 
-    func sendForgetCurrentDeviceTrust() {
-        sendMessage(RemoteMessage.trustControl(action: .forgetCurrentDevice, token: pairedToken, deviceID: deviceIdentifier))
+    func sendForgetCurrentDeviceTrust() async -> Bool {
+        await withCheckedContinuation { continuation in
+            sendMessage(
+                RemoteMessage.trustControl(action: .forgetCurrentDevice, token: pairedToken, deviceID: deviceIdentifier),
+                completion: { sent in
+                    continuation.resume(returning: sent)
+                }
+            )
+        }
     }
 
     func sendAudioConfig(source: AudioCaptureSource) {
@@ -170,8 +177,11 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(.pair(code: code, deviceName: deviceName, deviceID: deviceIdentifier))
     }
 
-    private func sendMessage(_ message: RemoteMessage) {
-        guard let task else { return }
+    private func sendMessage(_ message: RemoteMessage, completion: ((Bool) -> Void)? = nil) {
+        guard let task else {
+            completion?(false)
+            return
+        }
         do {
             let outboundMessage: RemoteMessage
             if shouldEncryptOutgoingControl(message: message) {
@@ -195,15 +205,18 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
 
             let payload = try RemoteProtocolCodec.encode(outboundMessage)
             task.send(.data(payload)) { [weak self] error in
-                guard let self else { return }
-                if let error {
-                    Task { @MainActor in
-                        self.handleError(error.localizedDescription)
+                Task { @MainActor in
+                    if let error {
+                        self?.handleError(error.localizedDescription)
+                        completion?(false)
+                    } else {
+                        completion?(true)
                     }
                 }
             }
         } catch {
             handleError(error.localizedDescription)
+            completion?(false)
         }
     }
 
