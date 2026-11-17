@@ -13,6 +13,9 @@ final class MacAppState: ObservableObject {
     @Published var lastError: String?
     @Published var startOnLoginEnabled = false
     @Published var captureRouteStatus = "Unknown"
+    @Published var availableDisplays: [HostDisplayInfo] = []
+    @Published var selectedDisplayID: UInt32 = HostDisplayPreferences.selectedDisplayID
+    @Published var virtualDisplayWhenHeadless = HostDisplayPreferences.virtualDisplayWhenHeadless
 
     private let pairingManager = PairingManager()
     private let permissionManager = AccessibilityPermissionManager()
@@ -105,6 +108,23 @@ final class MacAppState: ObservableObject {
         server.onCaptureRouteChange = { [weak self] route in
             self?.captureRouteStatus = route
         }
+
+        server.onDisplayCatalogChange = { [weak self] snapshot in
+            self?.captureRouteStatus = snapshot.routeLabel
+            self?.availableDisplays = snapshot.displays
+            self?.selectedDisplayID = snapshot.selectedDisplayID
+            self?.virtualDisplayWhenHeadless = snapshot.virtualDisplayWhenHeadless
+        }
+    }
+
+    func setVirtualDisplayWhenHeadless(_ enabled: Bool) {
+        virtualDisplayWhenHeadless = enabled
+        server.setVirtualDisplayWhenHeadless(enabled)
+    }
+
+    func selectDisplay(id: UInt32) {
+        selectedDisplayID = id
+        server.selectCaptureDisplay(id: id)
     }
 
     private func startPairingTicker() {

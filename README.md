@@ -47,7 +47,7 @@ Not a hardened remote administration solution yet:
 - Trusted-device pairing with optional trust reset from iPhone or Mac
 - Start on Login support for the macOS host
 - Host permission checklist for Accessibility and Screen Recording
-- Host preview diagnostics on iPhone (`capture route`, `display count`, `live/no frames`)
+- Host preview diagnostics on iPhone (which display is showing, physical display count, `live` / `no frames`)
 - Thermal auto-stepdown on host (`Ultra` -> `Balanced`) with iOS quality control lock during override
 
 ## Project Structure
@@ -69,7 +69,7 @@ Not a hardened remote administration solution yet:
 { "type": "streamConfig", "qualityMode": "ultra", "token": "..." }
 { "type": "audioConfig", "audioSource": "systemOutput", "token": "..." }
 { "type": "trustControl", "trustAction": "forgetCurrentDevice", "deviceID": "...", "token": "..." }
-{ "type": "streamStatus", "thermalOverrideActive": true, "captureRoute": "Real", "hostDisplayCount": 1, "previewCaptureActive": true }
+{ "type": "streamStatus", "thermalOverrideActive": false, "captureRoute": "Virtual display · 2560×1600", "hostDisplayCount": 0, "previewCaptureActive": true, "capturedDisplayName": "Virtual display · 2560×1600", "selectedDisplayID": 0, "virtualDisplayWhenHeadless": true }
 ```
 
 ## Build
@@ -141,9 +141,23 @@ Notes for CLI mode:
 - Host listens on port `8989` and advertises service type `_rkbd._tcp`.
 - Key mapping assumes US keyboard layout for MVP (`KeyCodeMapper`).
 - iOS background execution is limited by platform policy.
-- The iPhone preview strip can show host capture diagnostics such as route (`Real` / `Dummy/Fallback` / `Unknown`), online display count, and whether preview frames are currently live.
+- The iPhone preview strip names the display being shown (for example `Virtual display · 2560×1600` or the monitor name), how many physical displays macOS currently has online, and whether preview frames are live.
+- `hostDisplayCount` counts physical displays only. It is `0` while the host is showing its own virtual display.
+- When more than one display is online, the iPhone settings and the Mac menu bar can choose which one to show. `0` means automatic: the main awake display, otherwise the virtual display.
+- The host can keep a virtual display while no physical display is online. Turn that off with **Virtual display when no monitor** on the Mac menu bar or the iPhone. While an iPhone is paired, the host also keeps the display and the Mac from idle-sleeping.
 - Preview quality remains user-selectable unless thermal override is active.
 - During thermal override, host forces `Balanced` and iOS quality control is disabled until thermal recovers.
+
+## Monitor input switching and a Mac with no display
+
+The usual setup is one external monitor cabled to a MacBook on DisplayPort and a Mac mini on HDMI. What macOS does depends on the monitor, not on which input is visible on the panel.
+
+- **The HDMI link stays up.** Some monitors keep hot-plug detect asserted on every input. macOS still has that display online and awake, so the host keeps capturing it. The phone shows the monitor's name. The panel can be showing the MacBook while the phone shows the Mac mini desktop. No virtual display is created.
+- **The HDMI link drops.** Other monitors deassert hot-plug detect when you leave that input. macOS removes the display. With **Virtual display when no monitor** on (the default), the host creates a 2560×1600 virtual display, moves the pointer onto it, and captures that. The phone reads `Virtual display` and `0 physical displays`. Switching the monitor back removes the virtual display and capture returns to the physical one.
+- **The display is asleep but still connected.** The host does not add a second display for this. While an iPhone is paired it asks macOS to wake the displays and holds idle-sleep assertions so the framebuffer keeps updating.
+- **A Mac mini with nothing plugged in.** Same path as a dropped HDMI link: one virtual display, then preview, keyboard, and trackpad.
+
+The virtual display uses private `CGVirtualDisplay` SPI. That is appropriate for an app you install yourself. It is not an App Store API. If a future macOS removes it, the host reports that creation failed. An HDMI dummy plug is the hardware fallback: macOS then sees a normal display and the virtual display stays off.
 
 ## Privacy
 

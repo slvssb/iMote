@@ -8,6 +8,8 @@ struct MenuBarMenuView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             Divider()
+            displaySection
+            Divider()
             pairingSection
             Divider()
             accessibilitySection
@@ -34,6 +36,30 @@ struct MenuBarMenuView: View {
             Text("Capturing: \(appState.captureRouteStatus)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var displaySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Display")
+                .font(.subheadline.weight(.semibold))
+            Toggle("Virtual display when no monitor", isOn: Binding(
+                get: { appState.virtualDisplayWhenHeadless },
+                set: { appState.setVirtualDisplayWhenHeadless($0) }
+            ))
+            .font(.caption)
+            if appState.availableDisplays.count > 1 {
+                Picker("Show", selection: Binding(
+                    get: { appState.selectedDisplayID },
+                    set: { appState.selectDisplay(id: $0) }
+                )) {
+                    Text("Automatic").tag(UInt32(0))
+                    ForEach(appState.availableDisplays) { display in
+                        Text(display.menuTitle).tag(display.id)
+                    }
+                }
+                .font(.caption)
+            }
         }
     }
 

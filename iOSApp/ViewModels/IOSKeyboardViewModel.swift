@@ -252,13 +252,9 @@ final class IOSKeyboardViewModel: ObservableObject {
             self.isThermalQualityOverrideActive = isActive
         }
 
-        client.onHostCaptureStatusChanged = { [weak self] routeLabel, displayCount, isActive in
+        client.onHostCaptureStatusChanged = { [weak self] message in
             guard let self else { return }
-            self.screenPreview.updateHostCaptureStatus(
-                routeLabel: routeLabel,
-                displayCount: displayCount,
-                isActive: isActive
-            )
+            self.screenPreview.applyDisplayCatalog(message)
         }
 
         client.onPermissionStatus = { [weak self] accessibilityGranted, screenRecordingGranted in
@@ -418,6 +414,18 @@ final class IOSKeyboardViewModel: ObservableObject {
         guard abs(previewZoomLevel - clamped) > 0.01 else { return }
         previewZoomLevel = clamped
         client.sendStreamConfig(qualityMode: previewQualityMode, previewZoomLevel: previewZoomLevel)
+    }
+
+    func selectHostDisplay(_ id: UInt32) {
+        guard isPaired else { return }
+        screenPreview.selectedDisplayID = id
+        client.sendDisplayControl(displayID: id, virtualDisplayWhenHeadless: nil)
+    }
+
+    func setVirtualDisplayWhenHeadless(_ enabled: Bool) {
+        guard isPaired else { return }
+        screenPreview.virtualDisplayWhenHeadless = enabled
+        client.sendDisplayControl(displayID: nil, virtualDisplayWhenHeadless: enabled)
     }
 
     func setAudioCaptureSource(_ source: AudioCaptureSource) {

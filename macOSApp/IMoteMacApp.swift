@@ -150,6 +150,10 @@ private final class MacHostCLIRunner: NSObject {
         server.onRuntimeError = { reason in
             print("[iMote] Runtime error: \(reason)")
         }
+
+        server.onCaptureRouteChange = { route in
+            print("[iMote] Capturing: \(route)")
+        }
     }
 
     private func startPairingTicker() {
