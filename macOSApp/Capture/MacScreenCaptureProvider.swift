@@ -461,7 +461,7 @@ private final class SystemAndMicMixer {
             return nil
         }
         var convertError: NSError?
-        nonisolated(unsafe) let feed = MixerFeed(buffer: sourceBuffer)
+        let feed = MixerFeed(buffer: sourceBuffer)
         converter.convert(to: output, error: &convertError) { _, status in
             if feed.didFeed {
                 status.pointee = .noDataNow

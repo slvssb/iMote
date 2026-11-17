@@ -85,7 +85,7 @@ extension BonjourServiceBrowser: NetServiceDelegate {
                     var address = base.assumingMemoryBound(to: sockaddr_in.self).pointee
                     var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
                     if inet_ntop(AF_INET, &address.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil {
-                        ipv4 = String(cString: buffer)
+                        ipv4 = Self.addressString(buffer)
                     }
                 } else if family == sa_family_t(AF_INET6), rawBuffer.count >= MemoryLayout<sockaddr_in6>.size {
                     var address = base.assumingMemoryBound(to: sockaddr_in6.self).pointee
@@ -93,7 +93,7 @@ extension BonjourServiceBrowser: NetServiceDelegate {
                     guard inet_ntop(AF_INET6, &address.sin6_addr, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil else {
                         return
                     }
-                    let text = String(cString: buffer)
+                    let text = Self.addressString(buffer)
                     if text.hasPrefix("fe80") == false, ipv6 == nil {
                         ipv6 = text
                     }
@@ -101,6 +101,11 @@ extension BonjourServiceBrowser: NetServiceDelegate {
             }
         }
         return ipv4 ?? ipv6
+    }
+
+    private static func addressString(_ buffer: [CChar]) -> String {
+        let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {

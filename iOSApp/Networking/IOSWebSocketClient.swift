@@ -610,7 +610,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
 
     func removeTrustedHostPin(signingPublicKey: String) {
         guard signingPublicKey.isEmpty == false else { return }
-        var map = UserDefaults.standard.dictionary(forKey: Self.hostSigningKeysDefaultsKey) as? [String: String] ?? [:]
+        let map = UserDefaults.standard.dictionary(forKey: Self.hostSigningKeysDefaultsKey) as? [String: String] ?? [:]
         let remaining = map.filter { $0.value != signingPublicKey }
         if remaining.isEmpty {
             UserDefaults.standard.removeObject(forKey: Self.hostSigningKeysDefaultsKey)
