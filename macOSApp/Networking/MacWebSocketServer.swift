@@ -7,6 +7,8 @@ import Network
 final class MacWebSocketServer: @unchecked Sendable {
     private static let frameIntervalNanos: UInt64 = 16_666_667
     private static let adaptiveWindowTicks = 60
+    private static let maxUnauthenticatedConnections = 8
+    private static let maximumInboundMessageSize = 1_048_576
 
     struct ClientSnapshot: Sendable {
         let id: UUID
@@ -290,6 +292,7 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         let wsOptions = NWProtocolWebSocket.Options()
         wsOptions.autoReplyPing = true
+        wsOptions.maximumMessageSize = Self.maximumInboundMessageSize
         let parameters = NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
         // Wildcard bind. Leaving requiredInterface unset accepts Wi-Fi, Ethernet,
@@ -348,6 +351,12 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func accept(_ connection: NWConnection) {
+        let unauthenticated = clients.values.filter { $0.token == nil }.count
+        if unauthenticated >= Self.maxUnauthenticatedConnections {
+            connection.cancel()
+            return
+        }
+
         let id = UUID()
         let context = ClientContext(id: id, connection: connection, token: nil, deviceName: nil, secureSession: nil)
         clients[id] = context

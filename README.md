@@ -30,6 +30,7 @@ This app is designed for personal devices on trusted networks.
 Current mitigations:
 
 - 6-digit pairing code. A successful guess burns it. Failed guesses wait, and five failures rotate it.
+- At most eight connections that have not paired may be open at once, and a WebSocket frame larger than 1 MB is rejected.
 - A trusted phone can reconnect without a code only when its signing key is already pinned. The id is added to that set only after the handshake signature verifies.
 - Curve25519 handshake with signed ephemeral keys. The signature is checked before either side writes a pin. A bad hello does not stick.
 - Clear, Remove, and Forget delete the pin as well as the trusted id. The Mac window, menu bar, and iPhone show a fingerprint on first pair.
