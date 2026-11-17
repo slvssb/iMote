@@ -99,7 +99,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     var canContinueAfterPermissionGate: Bool {
-        permissionGatePhase == .checklist && hostPermissionState.allGranted
+        permissionGatePhase == .checklist && hostPermissionState.accessibilityGranted
     }
 
     private let browser = BonjourServiceBrowser()

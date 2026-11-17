@@ -1401,8 +1401,8 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private func assertHostPermissionsForControl(to id: UUID) -> Bool {
         let status = currentHostPermissionStatus()
-        guard status.accessibilityGranted, status.screenRecordingGranted else {
-            send(.error("Host permissions are required before remote control can start."), to: id)
+        guard status.accessibilityGranted else {
+            send(.error("Accessibility permission is required before remote control can start."), to: id)
             sendPermissionStatus(to: id)
             return false
         }
