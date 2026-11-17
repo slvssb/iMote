@@ -69,6 +69,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var userSelectedQualityMode: PreviewQualityMode = .ultra
     private var effectiveQualityMode: PreviewQualityMode = .ultra
     private var requestedPreviewZoomLevel: Double = 1.0
+    private var appliedPreviewZoomLevel: Double = -1
     private var selectedAudioCaptureSource: AudioCaptureSource = .off
     private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     private var isThermalOverrideActive = false
@@ -307,9 +308,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             self.listener?.cancel()
             self.listener = nil
             self.stopFrameBroadcasting()
-            Task { [weak self] in
-                await self?.screenCaptureProvider.stopCapture()
-            }
+            self.suspendCaptureBecauseNoPhonesRemain()
             self.h264Encoder.stop()
             self.aacEncoder.stop()
             self.virtualDisplayManager.tearDown()
@@ -347,6 +346,28 @@ final class MacWebSocketServer: @unchecked Sendable {
             pairingManager.revoke(token: removed.token)
         }
         publishClients()
+        refreshCaptureForConnectedPhones()
+    }
+
+    private func refreshCaptureForConnectedPhones() {
+        let hasPairedPhone = clients.values.contains { $0.token != nil }
+        if hasPairedPhone {
+            Task { [weak self] in
+                await self?.screenCaptureProvider.resumeCaptureForPairedClient()
+            }
+        } else {
+            suspendCaptureBecauseNoPhonesRemain()
+        }
+    }
+
+    private func suspendCaptureBecauseNoPhonesRemain() {
+        selectedAudioCaptureSource = .off
+        h264Encoder.stop()
+        aacEncoder.stop()
+        publishMediaStatus()
+        Task { [weak self] in
+            await self?.screenCaptureProvider.suspendForIdleClients()
+        }
     }
 
     private func receiveNext(for id: UUID) {
@@ -488,6 +509,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             sendStreamStatus(to: id)
             sendPermissionStatus(to: id)
             publishClients()
+            refreshCaptureForConnectedPhones()
         } else {
             send(.pairAck(success: false, token: nil, reason: result.reason), to: id)
         }
@@ -1237,29 +1259,36 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private func applyEffectiveQualityMode() {
         let nextMode: PreviewQualityMode = isThermalOverrideActive ? .balanced : userSelectedQualityMode
-        guard effectiveQualityMode != nextMode else { return }
-        effectiveQualityMode = nextMode
-
+        let zoom = requestedPreviewZoomLevel
+        let nextWidth: CGFloat
+        let nextProfile: H264FrameEncoder.QualityProfile
         switch nextMode {
         case .balanced:
-            if requestedPreviewZoomLevel >= 2.5 {
-                previewCaptureMaxWidth = 1680
-            } else {
-                previewCaptureMaxWidth = 1440
-            }
-            h264Encoder.setQualityProfile(.balanced)
+            nextWidth = zoom >= 2.5 ? 1680 : 1440
+            nextProfile = .balanced
         case .ultra:
-            if requestedPreviewZoomLevel >= 2.5 {
-                previewCaptureMaxWidth = 2560
-                h264Encoder.setQualityProfile(.ultraZoom)
-            } else if requestedPreviewZoomLevel >= 1.5 {
-                previewCaptureMaxWidth = 2240
-                h264Encoder.setQualityProfile(.ultra)
+            if zoom >= 2.5 {
+                nextWidth = 2560
+                nextProfile = .ultraZoom
+            } else if zoom >= 1.5 {
+                nextWidth = 2240
+                nextProfile = .ultra
             } else {
-                previewCaptureMaxWidth = 1920
-                h264Encoder.setQualityProfile(.ultra)
+                nextWidth = 1920
+                nextProfile = .ultra
             }
         }
+
+        let modeChanged = effectiveQualityMode != nextMode
+        let zoomChanged = abs(appliedPreviewZoomLevel - zoom) > 0.01
+        let widthChanged = abs(previewCaptureMaxWidth - nextWidth) > 0.5
+        guard modeChanged || zoomChanged || widthChanged else { return }
+
+        effectiveQualityMode = nextMode
+        appliedPreviewZoomLevel = zoom
+        previewCaptureMaxWidth = nextWidth
+        h264Encoder.setQualityProfile(nextProfile)
+        publishMediaStatus()
     }
 
     private func handleAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
