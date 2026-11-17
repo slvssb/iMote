@@ -81,7 +81,7 @@ enum HostDisplayDirectory {
             let kind: HostDisplayKind
             if virtual {
                 kind = .virtual
-            } else if CGDisplayIsBuiltin(id) {
+            } else if CGDisplayIsBuiltin(id) != 0 {
                 kind = .builtin
             } else {
                 kind = .physical
@@ -106,7 +106,7 @@ enum HostDisplayDirectory {
                 width: Int(CGDisplayPixelsWide(id)),
                 height: Int(CGDisplayPixelsHigh(id)),
                 kind: kind,
-                isAsleep: CGDisplayIsAsleep(id),
+                isAsleep: CGDisplayIsAsleep(id) != 0,
                 isCaptured: capturedID == id
             )
             let identity = DisplayHardwareIdentity(
@@ -213,7 +213,7 @@ final class VirtualDisplayManager {
 
     private func virtualDisplayObjectIsStale() -> Bool {
         guard display != nil else { return false }
-        if let virtualDisplayID, virtualDisplayID != 0, CGDisplayIsOnline(virtualDisplayID) {
+        if let virtualDisplayID, virtualDisplayID != 0, CGDisplayIsOnline(virtualDisplayID) != 0 {
             return false
         }
         if let found = matchingVirtualDisplayID() {
@@ -400,7 +400,7 @@ final class RemoteSessionPowerAssertion {
         var assertionID: IOPMAssertionID = 0
         let result = IOPMAssertionCreateWithName(
             type,
-            kIOPMAssertionLevelOn,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
             name as CFString,
             &assertionID
         )

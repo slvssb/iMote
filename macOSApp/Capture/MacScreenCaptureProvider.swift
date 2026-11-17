@@ -155,7 +155,7 @@ actor MacScreenCaptureProvider {
 
     func currentCaptureSnapshot() -> CaptureTargetSnapshot? {
         guard let activeDisplayID, sourceWidth > 0, sourceHeight > 0 else { return nil }
-        let asleep = CGDisplayIsAsleep(activeDisplayID)
+        let asleep = CGDisplayIsAsleep(activeDisplayID) != 0
         var label = activeSummaryLabel
         if asleep, label.contains("asleep") == false {
             label += " · asleep"
@@ -231,7 +231,7 @@ actor MacScreenCaptureProvider {
         activeDisplayKind = kind.rawValue
         let name = await Self.localizedName(for: display.displayID, kind: kind)
         activeDisplayName = name
-        let asleep = CGDisplayIsAsleep(display.displayID)
+        let asleep = CGDisplayIsAsleep(display.displayID) != 0
         activeSummaryLabel = Self.summaryLabel(name: name, width: display.width, height: display.height, isAsleep: asleep)
         activeCaptureRouteLabel = activeSummaryLabel
         contentFilter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
@@ -309,7 +309,7 @@ actor MacScreenCaptureProvider {
             CaptureDisplayCandidate(
                 id: display.displayID,
                 pixelCount: display.width * display.height,
-                isAsleep: CGDisplayIsAsleep(display.displayID),
+                isAsleep: CGDisplayIsAsleep(display.displayID) != 0,
                 isVirtual: Self.isVirtual(display.displayID, virtualDisplayID: virtualDisplayID),
                 isMain: display.displayID == CGMainDisplayID()
             )
@@ -340,7 +340,7 @@ actor MacScreenCaptureProvider {
         if isVirtual(id, virtualDisplayID: virtualDisplayID) {
             return .virtual
         }
-        if CGDisplayIsBuiltin(id) {
+        if CGDisplayIsBuiltin(id) != 0 {
             return .builtin
         }
         return .physical
