@@ -1,5 +1,22 @@
 import Foundation
 
+struct TrustedDeviceRecord: Identifiable, Equatable, Sendable {
+    var id: String
+    var name: String?
+    var fingerprint: String?
+
+    var displayName: String {
+        if let name {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty == false {
+                return trimmed
+            }
+        }
+        let suffix = id.prefix(8)
+        return suffix.isEmpty ? "iPhone" : "iPhone \(suffix)"
+    }
+}
+
 final class PairingManager {
     struct PairingResult {
         let success: Bool
@@ -14,9 +31,15 @@ final class PairingManager {
     private var activeTokens: [String: Date] = [:]
     private var trustedDeviceIDs: Set<String> = []
     private var trustedDeviceSigningKeys: [String: String] = [:]
+    private var trustedDeviceNames: [String: String] = [:]
+    private var provisionalDeviceIDs: [String: String] = [:]
+    private var failedAttempts = 0
+    private var nextAttemptAllowedAt = Date.distantPast
     private let trustedDevicesKey = "remoteKeyboard.trustedDeviceIDs"
     private let trustedSigningKeysKey = "remoteKeyboard.trustedDeviceSigningKeys"
+    private let trustedDeviceNamesKey = "remoteKeyboard.trustedDeviceNames"
     private let lock = NSLock()
+    private let maxFailuresBeforeCodeRotation = 5
 
     init(codeValiditySeconds: TimeInterval = 60) {
         self.codeValiditySeconds = codeValiditySeconds
@@ -29,6 +52,8 @@ final class PairingManager {
     @discardableResult
     func regenerateCode() -> String {
         withLock {
+            failedAttempts = 0
+            nextAttemptAllowedAt = .distantPast
             let next = PairingManager.makeCode()
             currentCode = next
             expiresAt = Date().addingTimeInterval(codeValiditySeconds)
@@ -45,25 +70,58 @@ final class PairingManager {
 
     func pair(code: String, deviceID: String?) -> PairingResult {
         withLock {
-            if let deviceID, trustedDeviceIDs.contains(deviceID) {
-                let token = UUID().uuidString.lowercased()
-                activeTokens[token] = Date().addingTimeInterval(60 * 60)
-                return PairingResult(success: true, token: token, reason: nil)
+            let now = Date()
+            if now < nextAttemptAllowedAt {
+                let wait = max(1, Int(ceil(nextAttemptAllowedAt.timeIntervalSince(now))))
+                return PairingResult(
+                    success: false,
+                    token: nil,
+                    reason: "Too many pairing attempts. Wait \(wait)s and use the code shown on the Mac."
+                )
+            }
+
+            let normalizedID = deviceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasDeviceID = normalizedID?.isEmpty == false
+            if hasDeviceID,
+               let normalizedID,
+               trustedDeviceIDs.contains(normalizedID),
+               trustedDeviceSigningKeys[normalizedID] != nil {
+                return issueToken(deviceID: normalizedID)
             }
 
             ensureActiveCode()
             guard code == currentCode else {
+                registerFailure(now: now)
                 return PairingResult(success: false, token: nil, reason: "Invalid pairing code.")
             }
 
-            if let deviceID, deviceID.isEmpty == false {
-                trustedDeviceIDs.insert(deviceID)
-                persistTrustedDevices()
-            }
+            // A matching code is single-use. The device id is not trusted until the handshake signature verifies.
+            currentCode = PairingManager.makeCode()
+            expiresAt = now.addingTimeInterval(codeValiditySeconds)
+            failedAttempts = 0
+            nextAttemptAllowedAt = .distantPast
+            return issueToken(deviceID: hasDeviceID ? normalizedID : nil)
+        }
+    }
 
-            let token = UUID().uuidString.lowercased()
-            activeTokens[token] = Date().addingTimeInterval(60 * 60)
-            return PairingResult(success: true, token: token, reason: nil)
+    func provisionalDeviceID(for token: String) -> String? {
+        withLock {
+            provisionalDeviceIDs[token]
+        }
+    }
+
+    func confirmTrustedDeviceAfterHandshake(token: String, deviceID: String) -> Bool {
+        withLock {
+            let normalizedID = deviceID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard normalizedID.isEmpty == false else { return false }
+            guard activeTokens[token] != nil else { return false }
+            if let bound = provisionalDeviceIDs[token], bound != normalizedID {
+                return false
+            }
+            trustedDeviceIDs.insert(normalizedID)
+            provisionalDeviceIDs.removeValue(forKey: token)
+            persistTrustedDevices()
+            return true
         }
     }
 
@@ -73,6 +131,7 @@ final class PairingManager {
             guard let expiration = activeTokens[token] else { return false }
             if expiration < Date() {
                 activeTokens.removeValue(forKey: token)
+                provisionalDeviceIDs.removeValue(forKey: token)
                 return false
             }
             return true
@@ -83,6 +142,7 @@ final class PairingManager {
         withLock {
             guard let token else { return }
             activeTokens.removeValue(forKey: token)
+            provisionalDeviceIDs.removeValue(forKey: token)
         }
     }
 
@@ -92,10 +152,40 @@ final class PairingManager {
         }
     }
 
+    func trustedDevices() -> [TrustedDeviceRecord] {
+        withLock {
+            trustedDeviceIDs.map { id in
+                TrustedDeviceRecord(
+                    id: id,
+                    name: trustedDeviceNames[id],
+                    fingerprint: fingerprint(forSigningKey: trustedDeviceSigningKeys[id])
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+        }
+    }
+
+    func noteTrustedDevice(deviceID: String, name: String?) {
+        withLock {
+            guard deviceID.isEmpty == false, trustedDeviceIDs.contains(deviceID) else { return }
+            let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard trimmed.isEmpty == false else { return }
+            guard trustedDeviceNames[deviceID] != trimmed else { return }
+            trustedDeviceNames[deviceID] = trimmed
+            persistTrustedDeviceNames()
+        }
+    }
+
     func clearTrustedDevices() {
         withLock {
             trustedDeviceIDs.removeAll()
+            trustedDeviceNames.removeAll()
+            trustedDeviceSigningKeys.removeAll()
             persistTrustedDevices()
+            persistTrustedDeviceNames()
+            persistTrustedSigningKeys()
         }
     }
 
@@ -103,25 +193,70 @@ final class PairingManager {
         withLock {
             trustedDeviceIDs.remove(deviceID)
             trustedDeviceSigningKeys.removeValue(forKey: deviceID)
+            trustedDeviceNames.removeValue(forKey: deviceID)
             persistTrustedDevices()
+            persistTrustedSigningKeys()
+            persistTrustedDeviceNames()
+        }
+    }
+
+    enum SigningPinResult {
+        case matchedExisting
+        case pinnedNew
+        case mismatch
+    }
+
+    /// Call only after the handshake signature has been verified.
+    func pinSigningKeyAfterVerification(deviceID: String, signingPublicKeyBase64: String) -> SigningPinResult {
+        withLock {
+            if let existing = trustedDeviceSigningKeys[deviceID] {
+                return existing == signingPublicKeyBase64 ? .matchedExisting : .mismatch
+            }
+            trustedDeviceSigningKeys[deviceID] = signingPublicKeyBase64
+            persistTrustedSigningKeys()
+            return .pinnedNew
+        }
+    }
+
+    func rollbackNewSigningPin(deviceID: String) {
+        withLock {
+            trustedDeviceSigningKeys.removeValue(forKey: deviceID)
             persistTrustedSigningKeys()
         }
     }
 
-    func verifyOrPinSigningKey(deviceID: String, signingPublicKeyBase64: String) -> Bool {
-        withLock {
-            if let existing = trustedDeviceSigningKeys[deviceID] {
-                return existing == signingPublicKeyBase64
-            }
-            trustedDeviceSigningKeys[deviceID] = signingPublicKeyBase64
-            persistTrustedSigningKeys()
-            return true
+    private func fingerprint(forSigningKey signingPublicKeyBase64: String?) -> String? {
+        guard let signingPublicKeyBase64,
+              let data = Data(base64Encoded: signingPublicKeyBase64) else {
+            return nil
         }
+        return IdentityFingerprint.displayString(forPublicKey: data)
     }
 
     func pinnedSigningKey(deviceID: String) -> String? {
         withLock {
             trustedDeviceSigningKeys[deviceID]
+        }
+    }
+
+    private func issueToken(deviceID: String?) -> PairingResult {
+        let token = UUID().uuidString.lowercased()
+        activeTokens[token] = Date().addingTimeInterval(60 * 60)
+        if let deviceID, deviceID.isEmpty == false {
+            provisionalDeviceIDs[token] = deviceID
+        }
+        return PairingResult(success: true, token: token, reason: nil)
+    }
+
+    private func registerFailure(now: Date) {
+        failedAttempts += 1
+        let exponent = min(failedAttempts, 5)
+        let delay = min(pow(2.0, Double(exponent - 1)), 30)
+        nextAttemptAllowedAt = now.addingTimeInterval(delay)
+        if failedAttempts >= maxFailuresBeforeCodeRotation {
+            currentCode = PairingManager.makeCode()
+            expiresAt = now.addingTimeInterval(codeValiditySeconds)
+            failedAttempts = 0
         }
     }
 
@@ -136,6 +271,17 @@ final class PairingManager {
         let stored = UserDefaults.standard.stringArray(forKey: trustedDevicesKey) ?? []
         trustedDeviceIDs = Set(stored)
         trustedDeviceSigningKeys = UserDefaults.standard.dictionary(forKey: trustedSigningKeysKey) as? [String: String] ?? [:]
+        let storedNames = UserDefaults.standard.dictionary(forKey: trustedDeviceNamesKey) as? [String: String] ?? [:]
+        // An id saved before a verified handshake cannot skip the code.
+        let unverified = trustedDeviceIDs.filter { trustedDeviceSigningKeys[$0] == nil }
+        if unverified.isEmpty == false {
+            trustedDeviceIDs.subtract(unverified)
+            persistTrustedDevices()
+        }
+        trustedDeviceNames = storedNames.filter { trustedDeviceIDs.contains($0.key) }
+        if trustedDeviceNames.count != storedNames.count {
+            persistTrustedDeviceNames()
+        }
     }
 
     private func persistTrustedDevices() {
@@ -144,6 +290,10 @@ final class PairingManager {
 
     private func persistTrustedSigningKeys() {
         UserDefaults.standard.set(trustedDeviceSigningKeys, forKey: trustedSigningKeysKey)
+    }
+
+    private func persistTrustedDeviceNames() {
+        UserDefaults.standard.set(trustedDeviceNames, forKey: trustedDeviceNamesKey)
     }
 
     private static func makeCode() -> String {

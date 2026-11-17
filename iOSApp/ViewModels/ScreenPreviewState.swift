@@ -3,7 +3,6 @@ import AVFoundation
 import CoreImage
 import Foundation
 import SwiftUI
-import UIKit
 
 @MainActor
 final class ScreenPreviewState: ObservableObject {
@@ -28,9 +27,7 @@ final class ScreenPreviewState: ObservableObject {
     private var timerCancellable: AnyCancellable?
     private var glowSampleCounter = 0
     private var smoothedGlowRGB: SIMD3<Double>?
-    private let ciContext = CIContext(options: [
-        .cacheIntermediates: false
-    ])
+    private let glowSampler = PreviewGlowSampler()
 
     init() {
         timerCancellable = Timer.publish(every: 1, on: .main, in: .common)
@@ -58,17 +55,6 @@ final class ScreenPreviewState: ObservableObject {
         displayBridge.flush()
     }
 
-    func consumeFrameData(_ data: Data) {
-        guard let image = UIImage(data: data) else { return }
-        consumeFrameImage(image)
-    }
-
-    func consumeFrameImage(_ image: UIImage) {
-        _ = image
-        hasFrame = true
-        recordArrival()
-    }
-
     func consumeDecodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         if let pixelBuffer = sampleBuffer.imageBuffer {
             let width = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
@@ -76,7 +62,7 @@ final class ScreenPreviewState: ObservableObject {
             if height > 0 {
                 sourceAspectRatio = width / height
             }
-            updatePreviewGlowColor(from: pixelBuffer)
+            schedulePreviewGlowSample(pixelBuffer)
         }
         hasFrame = true
         displayBridge.enqueue(sampleBuffer)
@@ -148,6 +134,14 @@ final class ScreenPreviewState: ObservableObject {
         hostCaptureStatusLabel = "Showing \(normalizedRoute) • \(displaySummary) • \(activitySummary)"
     }
 
+    func noteCaptureDidNotStart() {
+        guard hasFrame == false else { return }
+        statsLabel = "No preview — input is ready"
+        if hostCaptureStatusLabel == "Host: unknown" {
+            hostCaptureStatusLabel = "No frames yet. Check Screen Recording on the Mac."
+        }
+    }
+
     private func recordArrival() {
         let now = Date()
         lastFrameReceivedAt = now
@@ -190,43 +184,26 @@ final class ScreenPreviewState: ObservableObject {
         statsLabel = "~\(fps) fps • decode \(decodeMs) ms • render \(ageMs) ms"
     }
 
-    private func updatePreviewGlowColor(from pixelBuffer: CVPixelBuffer) {
+    private func schedulePreviewGlowSample(_ pixelBuffer: CVPixelBuffer) {
         glowSampleCounter += 1
         guard glowSampleCounter % 6 == 0 else { return }
-
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
-        let extent = image.extent
-        guard extent.isEmpty == false else { return }
-
-        // Sample a centered region to avoid unstable colors from edge UI chrome.
-        let sampleRect = extent.insetBy(dx: extent.width * 0.22, dy: extent.height * 0.28)
-        let filterInputExtent = CIVector(cgRect: sampleRect)
-        guard
-            let filter = CIFilter(name: "CIAreaAverage", parameters: [
-                kCIInputImageKey: image,
-                kCIInputExtentKey: filterInputExtent
-            ]),
-            let outputImage = filter.outputImage
-        else {
+        if let lastFrameReceivedAt, Date().timeIntervalSince(lastFrameReceivedAt) > 0.05 {
             return
         }
+        guard glowSampler.tryBegin() else { return }
+        let buffer = GlowPixelBuffer(value: pixelBuffer)
+        Task.detached(priority: .utility) { [glowSampler] in
+            let sampled = glowSampler.sample(buffer.value)
+            await MainActor.run { [weak self] in
+                self?.glowSampler.end()
+                if let sampled {
+                    self?.applyPreviewGlow(sampled)
+                }
+            }
+        }
+    }
 
-        var rgba = [UInt8](repeating: 0, count: 4)
-        ciContext.render(
-            outputImage,
-            toBitmap: &rgba,
-            rowBytes: 4,
-            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-            format: .RGBA8,
-            colorSpace: CGColorSpaceCreateDeviceRGB()
-        )
-
-        let sampled = SIMD3<Double>(
-            Double(rgba[0]) / 255.0,
-            Double(rgba[1]) / 255.0,
-            Double(rgba[2]) / 255.0
-        )
-
+    private func applyPreviewGlow(_ sampled: SIMD3<Double>) {
         let blendAlpha = 0.18
         let blended: SIMD3<Double>
         if let current = smoothedGlowRGB {
@@ -235,11 +212,62 @@ final class ScreenPreviewState: ObservableObject {
             blended = sampled
         }
         smoothedGlowRGB = blended
-
         previewGlowColor = Color(
             red: min(max(blended.x, 0), 1),
             green: min(max(blended.y, 0), 1),
             blue: min(max(blended.z, 0), 1)
+        )
+    }
+}
+
+private struct GlowPixelBuffer: @unchecked Sendable {
+    let value: CVPixelBuffer
+}
+
+private final class PreviewGlowSampler: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isSampling = false
+    private let context = CIContext(options: [.cacheIntermediates: false])
+
+    func tryBegin() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isSampling == false else { return false }
+        isSampling = true
+        return true
+    }
+
+    func end() {
+        lock.lock()
+        isSampling = false
+        lock.unlock()
+    }
+
+    func sample(_ pixelBuffer: CVPixelBuffer) -> SIMD3<Double>? {
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let extent = image.extent
+        guard extent.isEmpty == false else { return nil }
+        let sampleRect = extent.insetBy(dx: extent.width * 0.22, dy: extent.height * 0.28)
+        guard let filter = CIFilter(name: "CIAreaAverage", parameters: [
+            kCIInputImageKey: image,
+            kCIInputExtentKey: CIVector(cgRect: sampleRect)
+        ]),
+        let outputImage = filter.outputImage else {
+            return nil
+        }
+        var rgba = [UInt8](repeating: 0, count: 4)
+        context.render(
+            outputImage,
+            toBitmap: &rgba,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        return SIMD3(
+            Double(rgba[0]) / 255.0,
+            Double(rgba[1]) / 255.0,
+            Double(rgba[2]) / 255.0
         )
     }
 }

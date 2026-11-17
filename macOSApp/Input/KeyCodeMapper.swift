@@ -1,16 +1,16 @@
+import Carbon
 import CoreGraphics
 import Foundation
 
+struct ResolvedKeystroke {
+    let keyCode: CGKeyCode
+    let flags: CGEventFlags
+}
+
 struct KeyCodeMapper {
-    private let mapping: [String: CGKeyCode] = {
-        var result: [String: CGKeyCode] = [
-            "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
-            "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17,
-            "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "=": 24, "9": 25, "7": 26,
-            "-": 27, "8": 28, "0": 29, "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35,
-            "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42, ",": 43, "/": 44, "n": 45,
-            "m": 46, ".": 47, "`": 50
-        ]
+    private let layoutTable = LayoutKeyTable()
+    private let namedKeys: [String: CGKeyCode] = {
+        var result: [String: CGKeyCode] = [:]
 
         let aliases: [(String, CGKeyCode)] = [
             (RemoteModifier.command.rawValue, 55),
@@ -66,12 +66,20 @@ struct KeyCodeMapper {
             .replacingOccurrences(of: " ", with: "")
     }
 
-    func keyCode(for key: String) -> CGKeyCode? {
-        let normalized = normalizedKey(for: key)
-        if let direct = mapping[normalized] {
-            return direct
+    func resolve(key: String, modifiers: [RemoteModifier]) -> ResolvedKeystroke? {
+        let compact = normalizedKey(for: key)
+        if let code = namedKeys[compact] ?? namedKeys[compact.lowercased()] {
+            return ResolvedKeystroke(keyCode: code, flags: eventFlags(for: modifiers))
         }
-        return mapping[normalized.lowercased()]
+
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count == 1, let character = trimmed.first else { return nil }
+        guard let match = layoutTable.lookup(character) else { return nil }
+        var flags = eventFlags(for: modifiers)
+        if match.needsShift {
+            flags.insert(.maskShift)
+        }
+        return ResolvedKeystroke(keyCode: match.keyCode, flags: flags)
     }
 
     func eventFlags(for modifiers: [RemoteModifier]) -> CGEventFlags {
@@ -89,5 +97,101 @@ struct KeyCodeMapper {
             }
         }
         return flags
+    }
+}
+
+private final class LayoutKeyTable {
+    struct Match {
+        let keyCode: CGKeyCode
+        let needsShift: Bool
+    }
+
+    private var sourceID = ""
+    private var unshifted: [Character: CGKeyCode] = [:]
+    private var shifted: [Character: CGKeyCode] = [:]
+    private var didLoadLayout = false
+
+    func lookup(_ character: Character) -> Match? {
+        refreshIfNeeded()
+        if let code = unshifted[character] {
+            return Match(keyCode: code, needsShift: false)
+        }
+        if let code = shifted[character] {
+            return Match(keyCode: code, needsShift: true)
+        }
+        return nil
+    }
+
+    private func refreshIfNeeded() {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue() else {
+            didLoadLayout = false
+            unshifted.removeAll()
+            shifted.removeAll()
+            return
+        }
+        let currentID: String
+        if let rawID = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) {
+            currentID = Unmanaged<CFString>.fromOpaque(rawID).takeUnretainedValue() as String
+        } else {
+            currentID = ""
+        }
+        guard currentID != sourceID || didLoadLayout == false else { return }
+        sourceID = currentID
+        rebuild(source: source)
+    }
+
+    private func rebuild(source: TISInputSource) {
+        unshifted.removeAll()
+        shifted.removeAll()
+        guard let rawLayout = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+            didLoadLayout = false
+            return
+        }
+        let data = Unmanaged<CFData>.fromOpaque(rawLayout).takeUnretainedValue()
+        guard let bytes = CFDataGetBytePtr(data) else {
+            didLoadLayout = false
+            return
+        }
+        let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
+        let keyboardType = UInt32(LMGetKbdType())
+        let shiftModifier = UInt32((Int(shiftKey) >> 8) & 0xFF)
+
+        for code in 0..<128 {
+            let keyCode = CGKeyCode(code)
+            if let plain = translate(layout, keyCode: UInt16(code), modifier: 0, keyboardType: keyboardType),
+               plain.count == 1, let character = plain.first, unshifted[character] == nil {
+                unshifted[character] = keyCode
+            }
+            if let shiftedText = translate(layout, keyCode: UInt16(code), modifier: shiftModifier, keyboardType: keyboardType),
+               shiftedText.count == 1, let character = shiftedText.first, self.shifted[character] == nil {
+                self.shifted[character] = keyCode
+            }
+        }
+        didLoadLayout = true
+    }
+
+    private func translate(
+        _ layout: UnsafePointer<UCKeyboardLayout>,
+        keyCode: UInt16,
+        modifier: UInt32,
+        keyboardType: UInt32
+    ) -> String? {
+        var deadKeyState: UInt32 = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        var length = 0
+        let status = UCKeyTranslate(
+            layout,
+            keyCode,
+            UInt16(kUCKeyActionDisplay),
+            modifier,
+            keyboardType,
+            OptionBits(kUCKeyTranslateNoDeadKeysBit),
+            &deadKeyState,
+            chars.count,
+            &length,
+            &chars
+        )
+        guard status == noErr, length > 0 else { return nil }
+        return String(utf16CodeUnits: chars, count: length)
     }
 }

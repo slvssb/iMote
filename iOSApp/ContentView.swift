@@ -435,17 +435,22 @@ private struct MacCenteredLogoOverlay: View {
                     }
                     .ignoresSafeArea()
                 } else {
-                    VStack(spacing: Layout.sectionSpacing) {
-                        if viewModel.shouldShowPermissionGate {
-                            permissionGatePanel
-                        } else {
-                            connectionPanel
+                    ScrollView {
+                        VStack(spacing: Layout.sectionSpacing) {
+                            if viewModel.shouldShowPermissionGate {
+                                permissionGatePanel
+                            } else {
+                                connectionPanel
+                            }
                         }
+                        .frame(maxWidth: Layout.contentMaxWidth)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                        .padding(.horizontal, Layout.contentPadding)
+                        .padding(.vertical, Layout.verticalPadding)
                     }
-                    .frame(maxWidth: Layout.contentMaxWidth)
+                    .scrollBounceBehavior(.basedOnSize)
+                    .scrollDismissesKeyboard(.interactively)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(.horizontal, Layout.contentPadding)
-                    .padding(.vertical, Layout.verticalPadding)
                     .opacity(connectionScreenOpacity)
                 }
             }
@@ -540,6 +545,7 @@ private struct MacCenteredLogoOverlay: View {
                 ScrollView {
                     VStack(spacing: Layout.sectionSpacing) {
                         previewControlsPanel
+                        fingerprintCaption
                         Button("Disconnect", role: .destructive) {
                             beginControlledDisconnectSequence(forgetDevice: false)
                             isConfigSheetPresented = false
@@ -601,6 +607,9 @@ private struct MacCenteredLogoOverlay: View {
                         Text("Remote").tag(IOSKeyboardViewModel.ConnectionTargetMode.manualAddress)
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: viewModel.connectionTargetMode) { _, _ in
+                        viewModel.noteConnectionDraftChanged()
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: Layout.rowSpacing) {
@@ -609,7 +618,7 @@ private struct MacCenteredLogoOverlay: View {
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
                         if viewModel.connectionTargetMode == .manualAddress {
-                            Text("Remote mode requires the Mac host to be reachable at this IP and port.")
+                            Text("Use the Tailscale name or 100.x address shown on the Mac. Saved hosts stay on this iPhone.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -635,13 +644,58 @@ private struct MacCenteredLogoOverlay: View {
                         }
                     } else {
                         VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                            Text("Remote Host / IP")
+                            if viewModel.savedHosts.isEmpty == false {
+                                Text("Saved Hosts")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                ForEach(viewModel.savedHosts) { saved in
+                                    fieldShell {
+                                        HStack(spacing: 10) {
+                                            Button {
+                                                viewModel.selectSavedHost(saved)
+                                            } label: {
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(saved.host)
+                                                        .font(.footnote.weight(.semibold))
+                                                        .foregroundStyle(.primary)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.middle)
+                                                    Text("Port \(saved.port)")
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                            }
+                                            .buttonStyle(.plain)
+                                            if viewModel.manualHost.caseInsensitiveCompare(saved.host) == .orderedSame,
+                                               viewModel.manualPortText == String(saved.port) {
+                                                Image(systemName: "checkmark")
+                                                    .font(.caption.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            Button {
+                                                viewModel.forgetSavedHost(saved)
+                                            } label: {
+                                                Image(systemName: "minus.circle.fill")
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Remove \(saved.host)")
+                                        }
+                                    }
+                                }
+                            }
+                            Text("Tailscale name or IP")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             fieldShell {
-                                TextField("203.0.113.10", text: $viewModel.manualHost)
+                                TextField("macbook.tailnet.ts.net", text: $viewModel.manualHost)
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
+                                    .keyboardType(.URL)
+                                    .onChange(of: viewModel.manualHost) { _, _ in
+                                        viewModel.noteConnectionDraftChanged()
+                                    }
                             }
                             Text("Port")
                                 .font(.caption.weight(.semibold))
@@ -657,6 +711,7 @@ private struct MacCenteredLogoOverlay: View {
                                         if viewModel.manualPortText != trimmed {
                                             viewModel.manualPortText = trimmed
                                         }
+                                        viewModel.noteConnectionDraftChanged()
                                     }
                             }
                         }
@@ -687,7 +742,7 @@ private struct MacCenteredLogoOverlay: View {
                                 .font(.system(.body, design: .monospaced))
                         }
                     }
-                } else if viewModel.connectionTargetMode == .localDiscovery {
+                } else {
                     HStack(spacing: 10) {
                         Image(systemName: "checkmark.shield")
                             .foregroundStyle(.green)
@@ -696,6 +751,16 @@ private struct MacCenteredLogoOverlay: View {
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+
+                fingerprintCaption
+
+                if viewModel.hasTrustedSessionLocally {
+                    Button("Forget trusted Mac") {
+                        viewModel.forgetTrustedSessionOnPhone()
+                    }
+                    .font(.footnote.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
@@ -727,12 +792,33 @@ private struct MacCenteredLogoOverlay: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var fingerprintCaption: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("This iPhone \(viewModel.localSigningFingerprint)")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            if let macFingerprint = viewModel.pairedHostFingerprint {
+                Text("Mac \(macFingerprint)")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                if viewModel.pairedHostFingerprintIsNew {
+                    Text("First pair. Compare these fingerprints with the Mac before you type.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var permissionGatePanel: some View {
         VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
             VStack(alignment: .leading, spacing: Layout.rowSpacing) {
                 Text("Host Permissions")
                     .font(.title3.weight(.semibold))
-                Text("Checking whether your Mac host has the required permissions before remote control starts.")
+                Text("Accessibility lets the iPhone type and move the pointer. Screen Recording is only needed for live preview.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -913,7 +999,12 @@ private struct MacCenteredLogoOverlay: View {
             }
 
             let minimumEnd = ContinuousClock.now + .seconds(2)
+            let previewTimeout = ContinuousClock.now + .seconds(6)
             while viewModel.screenPreview.hasFrame == false {
+                if ContinuousClock.now >= previewTimeout {
+                    viewModel.notePreviewDidNotStart()
+                    break
+                }
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 guard Task.isCancelled == false else { return }
             }
@@ -1032,8 +1123,12 @@ private struct MacCenteredLogoOverlay: View {
             guard Task.isCancelled == false else { return }
 
             if shouldForgetOnControlledDisconnect {
-                viewModel.forgetCurrentDeviceTrustOnMac()
+                let forgot = await viewModel.forgetCurrentDeviceTrustOnMac()
                 shouldForgetOnControlledDisconnect = false
+                guard forgot, Task.isCancelled == false else {
+                    restoreConnectedControlsAfterFailedForget()
+                    return
+                }
             }
             if isControlledDisconnectFlow {
                 viewModel.disconnect()
@@ -1057,6 +1152,23 @@ private struct MacCenteredLogoOverlay: View {
                 connectionScreenOpacity = 1
             }
         }
+    }
+
+    private func restoreConnectedControlsAfterFailedForget() {
+        disconnectTask = nil
+        isDisconnectPreviewOverlayVisible = false
+        disconnectPreviewOverlayOpacity = 0
+        isDisconnectTransitionActive = false
+        isControlledDisconnectFlow = false
+        lockedDisconnectPreviewAspectRatio = nil
+        showConnectedLayout = true
+        connectedScreenOpacity = 1
+        connectionScreenOpacity = 0
+        isPreviewSectionVisible = true
+        isLivePreviewVisible = true
+        isStatsSectionVisible = true
+        isKeyboardSectionVisible = true
+        isTrackpadSectionVisible = true
     }
 
     private func cancelDisconnectSequence() {
@@ -1139,10 +1251,20 @@ private struct MacCenteredLogoOverlay: View {
     }
 
     private var previewStatsStrip: some View {
-        PreviewStatsStripView(preview: viewModel.screenPreview) {
-            focusedField = nil
-            dismissTypingCapture()
-            isConfigSheetPresented = true
+        VStack(spacing: 6) {
+            PreviewStatsStripView(preview: viewModel.screenPreview) {
+                focusedField = nil
+                dismissTypingCapture()
+                isConfigSheetPresented = true
+            }
+            if showConnectedLayout, let error = viewModel.lastError, error.isEmpty == false {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .padding(.horizontal, 16)
+            }
         }
     }
 
@@ -1522,16 +1644,6 @@ private struct MacCenteredLogoOverlay: View {
         }
     }
 
-    private var connectionBadgeText: String {
-        if viewModel.isPaired {
-            return "Paired"
-        }
-        if viewModel.isDisconnected {
-            return "Disconnected"
-        }
-        return "Connecting"
-    }
-
     private var selectedServiceBinding: Binding<DiscoveredService?> {
         Binding(
             get: { viewModel.selectedService },
@@ -1553,11 +1665,7 @@ private struct MacCenteredLogoOverlay: View {
                 return false
             }
         case .manualAddress:
-            let trimmedHost = viewModel.manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmedHost.isEmpty == false else {
-                return false
-            }
-            guard let parsedPort = Int(viewModel.manualPortText), (1...65_535).contains(parsedPort) else {
+            guard case .success = RemoteHostAddress.parse(hostField: viewModel.manualHost, portField: viewModel.manualPortText) else {
                 return false
             }
         }
@@ -1575,15 +1683,8 @@ private struct MacCenteredLogoOverlay: View {
             return "Select a Mac host to continue."
         }
         if viewModel.connectionTargetMode == .manualAddress {
-            let trimmedHost = viewModel.manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmedHost.isEmpty {
-                return "Enter the remote host or IP address."
-            }
-            if let parsedPort = Int(viewModel.manualPortText), (1...65_535).contains(parsedPort) == false {
-                return "Enter a valid port between 1 and 65535."
-            }
-            if Int(viewModel.manualPortText) == nil {
-                return "Enter a valid port between 1 and 65535."
+            if case let .failure(failure) = RemoteHostAddress.parse(hostField: viewModel.manualHost, portField: viewModel.manualPortText) {
+                return failure.message
             }
         }
         if viewModel.isTrustedAutoReconnect == false && viewModel.pairingCode.count != 6 {
@@ -1594,7 +1695,7 @@ private struct MacCenteredLogoOverlay: View {
 
     private var shouldShowConnectDisabledReason: Bool {
         if viewModel.connectionTargetMode == .manualAddress,
-           connectDisabledReason == "Enter the remote host or IP address." {
+           connectDisabledReason == RemoteHostAddress.ParseFailure.missingHost.message {
             return false
         }
         return connectDisabledReason.isEmpty == false

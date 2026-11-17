@@ -25,6 +25,9 @@
 		B8D42FA15C3E4072B1F9D6E3 /* CaptureDisplaySelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A17C2B9D0F4A6E8B3C1D50 /* CaptureDisplaySelection.swift */; };
 		445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 889865EECE778A1590EAFE31 /* IMoteMacApp.swift */; };
 		46D6A68727A71EEA2AD55B25 /* MenuBarMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD75AE3DD9183B8564B32359 /* MenuBarMenuView.swift */; };
+		C0DE6379HOSTENDPTCAT002 /* HostEndpointCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE6379HOSTENDPTCAT001 /* HostEndpointCatalog.swift */; };
+		C0DE6379HOSTMAINWINDOW02 /* HostMainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE6379HOSTMAINWINDOW01 /* HostMainWindow.swift */; };
+		C0DE6379REMOTEHOSTADDR02 /* RemoteHostAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE6379REMOTEHOSTADDR01 /* RemoteHostAddress.swift */; };
 		4A93D86DF6015B98A2392104 /* IOSKeyboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA105BD98FA3EEC61C2743EA /* IOSKeyboardViewModel.swift */; };
 		4E6BE1C50B306B72DF0503D5 /* BonjourServiceBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF2249F384A3961E513C070 /* BonjourServiceBrowser.swift */; };
 		52A766052B849140BB2B6021 /* MacAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7803AE636C3EA2E530381324 /* MacAppState.swift */; };
@@ -33,12 +36,20 @@
 		7BBE0F435484393B42B37307 /* HiddenTextInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19235F060002223B9FF83C41 /* HiddenTextInputView.swift */; };
 		A1B2C3D4E5F6012345678901 /* iMote.icon in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6012345678903 /* iMote.icon */; };
 		A1B2C3D4E5F6012345678902 /* iMote.icon in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6012345678903 /* iMote.icon */; };
+		A1F1A1F1A1F1A1F1A1F10011 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10010 /* PrivacyInfo.xcprivacy */; };
+		A1F1A1F1A1F1A1F1A1F10013 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10012 /* PrivacyInfo.xcprivacy */; };
 		BAB45B3ADCC83FC094122A83 /* MacWebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8653253EC541A234D5C4AA /* MacWebSocketServer.swift */; };
 		BBA2DCA4C6A595D6E5C748AC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D748496989F8D3202C8011AD /* ContentView.swift */; };
 		EC0E9A83442F46E768DE86AE /* LiquidGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7FE07A98A15914F482BCFF /* LiquidGlass.swift */; };
 		F36EB551B89A95635967EEF4 /* KeyboardKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48B64DEDE8DA2202F1905FB6 /* KeyboardKey.swift */; };
 		F87C5BA31D4641564A3AA785 /* RemoteKeyboardProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */; };
 		06C39E4D1F2B4C809D5E3F72 /* CaptureDisplaySelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A17C2B9D0F4A6E8B3C1D50 /* CaptureDisplaySelection.swift */; };
+		A1F1A1F1A1F1A1F1A1F10002 /* IdentityFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */; };
+		A1F1A1F1A1F1A1F1A1F10003 /* IdentityFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */; };
+		A1F1A1F1A1F1A1F1A1F10005 /* SecureChannelCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */; };
+		A1F1A1F1A1F1A1F1A1F10006 /* SecureChannelCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */; };
+		A1F1A1F1A1F1A1F1A1F10008 /* SigningIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */; };
+		A1F1A1F1A1F1A1F1A1F10009 /* SigningIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -66,6 +77,15 @@
 		A30B15F95157EBCD2481742E /* IMoteiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMoteiOSApp.swift; sourceTree = "<group>"; };
 		A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteKeyboardProtocol.swift; sourceTree = "<group>"; };
 		E4A17C2B9D0F4A6E8B3C1D50 /* CaptureDisplaySelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureDisplaySelection.swift; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityFingerprint.swift; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureChannelCodec.swift; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningIdentityStore.swift; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10010 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10012 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10014 /* iMote-Host.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "iMote-Host.entitlements"; sourceTree = "<group>"; };
+		C0DE6379HOSTENDPTCAT001 /* HostEndpointCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostEndpointCatalog.swift; sourceTree = "<group>"; };
+		C0DE6379HOSTMAINWINDOW01 /* HostMainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostMainWindow.swift; sourceTree = "<group>"; };
+		C0DE6379REMOTEHOSTADDR01 /* RemoteHostAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHostAddress.swift; sourceTree = "<group>"; };
 		CBF2249F384A3961E513C070 /* BonjourServiceBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourServiceBrowser.swift; sourceTree = "<group>"; };
 		D1B5A789ADC802F2FFA34809 /* KeyboardInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInjector.swift; sourceTree = "<group>"; };
 		D1CA03D8B26AEEF394F1FADC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -81,6 +101,7 @@
 			isa = PBXGroup;
 			children = (
 				CBF2249F384A3961E513C070 /* BonjourServiceBrowser.swift */,
+				C0DE6379REMOTEHOSTADDR01 /* RemoteHostAddress.swift */,
 				4475252E2ACD2E5D3553A12B /* IOSWebSocketClient.swift */,
 			);
 			path = Networking;
@@ -108,6 +129,7 @@
 			children = (
 				D748496989F8D3202C8011AD /* ContentView.swift */,
 				D1CA03D8B26AEEF394F1FADC /* Info.plist */,
+				A1F1A1F1A1F1A1F1A1F10010 /* PrivacyInfo.xcprivacy */,
 				A30B15F95157EBCD2481742E /* IMoteiOSApp.swift */,
 				81C2EF69354165FA176CD490 /* Input */,
 				0255BFE2BF1901AEB12BD6CD /* Networking */,
@@ -226,6 +248,7 @@
 		B411F66D83EEAE2A6761C1BD /* Networking */ = {
 			isa = PBXGroup;
 			children = (
+				C0DE6379HOSTENDPTCAT001 /* HostEndpointCatalog.swift */,
 				3D8653253EC541A234D5C4AA /* MacWebSocketServer.swift */,
 			);
 			path = Networking;
@@ -234,6 +257,7 @@
 		C3ED65C905D65FA89562435A /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				C0DE6379HOSTMAINWINDOW01 /* HostMainWindow.swift */,
 				DD75AE3DD9183B8564B32359 /* MenuBarMenuView.swift */,
 			);
 			path = UI;
@@ -252,6 +276,8 @@
 			isa = PBXGroup;
 			children = (
 				EEE4FFDB46E24A20DC1C3B1E /* Info.plist */,
+				A1F1A1F1A1F1A1F1A1F10014 /* iMote-Host.entitlements */,
+				A1F1A1F1A1F1A1F1A1F10012 /* PrivacyInfo.xcprivacy */,
 				889865EECE778A1590EAFE31 /* IMoteMacApp.swift */,
 				61E8C5B71178F4A9DCDABD32 /* AppState */,
 				528D560E2185EA83EC0CD13A /* Input */,
@@ -266,11 +292,22 @@
 			path = macOSApp;
 			sourceTree = "<group>";
 		};
+		A1F1A1F1A1F1A1F1A1F1000A /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */,
+				A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */,
+				A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
 		D7973A45CDD7967AC6C70734 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
 				6D6E5F3A5351EFA9522EB8FB /* Input */,
 				0CFA137CE9A9803390A52CF0 /* Protocol */,
+				A1F1A1F1A1F1A1F1A1F1000A /* Security */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -354,6 +391,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F6012345678901 /* iMote.icon in Resources */,
+				A1F1A1F1A1F1A1F1A1F10011 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -362,6 +400,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F6012345678902 /* iMote.icon in Resources */,
+				A1F1A1F1A1F1A1F1A1F10013 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -382,11 +421,16 @@
 				3413DDA12F81A0000086D1D8 /* VirtualDisplayManager.swift in Sources */,
 				BAB45B3ADCC83FC094122A83 /* MacWebSocketServer.swift in Sources */,
 				3413DD992F80E1890086D1D8 /* AACAudioEncoder.swift in Sources */,
+				C0DE6379HOSTENDPTCAT002 /* HostEndpointCatalog.swift in Sources */,
+				C0DE6379HOSTMAINWINDOW02 /* HostMainWindow.swift in Sources */,
 				46D6A68727A71EEA2AD55B25 /* MenuBarMenuView.swift in Sources */,
 				7B495C10B03F7C21BC7B604F /* PairingManager.swift in Sources */,
 				445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */,
 				F87C5BA31D4641564A3AA785 /* RemoteKeyboardProtocol.swift in Sources */,
 				06C39E4D1F2B4C809D5E3F72 /* CaptureDisplaySelection.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10003 /* IdentityFingerprint.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10006 /* SecureChannelCodec.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10009 /* SigningIdentityStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -394,6 +438,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C0DE6379REMOTEHOSTADDR02 /* RemoteHostAddress.swift in Sources */,
 				4E6BE1C50B306B72DF0503D5 /* BonjourServiceBrowser.swift in Sources */,
 				BBA2DCA4C6A595D6E5C748AC /* ContentView.swift in Sources */,
 				3413DD912F7F15F80086D1D8 /* H264FrameDecoder.swift in Sources */,
@@ -407,6 +452,9 @@
 				EC0E9A83442F46E768DE86AE /* LiquidGlass.swift in Sources */,
 				3B321DF188E6DA67E424EA2C /* RemoteKeyboardProtocol.swift in Sources */,
 				B8D42FA15C3E4072B1F9D6E3 /* CaptureDisplaySelection.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10002 /* IdentityFingerprint.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10005 /* SecureChannelCodec.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10008 /* SigningIdentityStore.swift in Sources */,
 				5BA8D4731CB7DD70F5E2BAE7 /* IMoteiOSApp.swift in Sources */,
 				3413DD972F8050EA0086D1D8 /* EyeCursorController.swift in Sources */,
 			);
@@ -442,10 +490,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = iMote;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_ENTITLEMENTS = macOSApp/iMote-Host.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 7UHC5Q7YMD;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = macOSApp/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -462,10 +512,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = iMote;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_ENTITLEMENTS = macOSApp/iMote-Host.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 7UHC5Q7YMD;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = macOSApp/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (

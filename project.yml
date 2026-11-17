@@ -19,6 +19,10 @@ targets:
     sources:
       - path: Shared
       - path: iOSApp
+        excludes:
+          - PrivacyInfo.xcprivacy
+      - path: iOSApp/PrivacyInfo.xcprivacy
+        buildPhase: resources
     info:
       path: iOSApp/Info.plist
       properties:
@@ -26,7 +30,7 @@ targets:
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-        NSLocalNetworkUsageDescription: This app discovers and connects to your Mac keyboard server on local Wi-Fi.
+        NSLocalNetworkUsageDescription: iMote discovers your Mac on the local network and connects to Macs you save, including over Tailscale.
         NSBonjourServices:
           - _rkbd._tcp
         NSAppTransportSecurity:
@@ -43,12 +47,20 @@ targets:
     sources:
       - path: Shared
       - path: macOSApp
+        excludes:
+          - PrivacyInfo.xcprivacy
+          - iMote-Host.entitlements
+      - path: macOSApp/PrivacyInfo.xcprivacy
+        buildPhase: resources
     info:
       path: macOSApp/Info.plist
       properties:
         CFBundleDisplayName: iMote Host
-        LSUIElement: true
+        LSUIElement: false
+        NSMicrophoneUsageDescription: iMote streams this Mac's microphone to your paired iPhone when you choose Mic or Both.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.slvssb.imote.host
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: macOSApp/iMote-Host.entitlements
+        ENABLE_HARDENED_RUNTIME: YES

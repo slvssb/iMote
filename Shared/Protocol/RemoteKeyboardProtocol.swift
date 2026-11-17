@@ -1,5 +1,13 @@
 import Foundation
 
+public enum RemoteProtocol {
+    public static let version = 2
+
+    public static let incompatibleClientReason = "This iPhone is running an older iMote. Update both apps and try again."
+    public static let incompatibleHostReason = "This Mac is running an older iMote. Update both apps and try again."
+    public static let secureChannelFailedReason = "Secure channel failed. Update both iMote apps and reconnect."
+}
+
 public enum RemoteMessageType: String, Codable, Sendable {
     case pair
     case pairAck
@@ -21,7 +29,6 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case permissionStatus
     case permissionAction
     case displayControl
-    case screenFrame
     case ping
     case pong
     case error
@@ -140,7 +147,6 @@ public struct RemoteMessage: Codable, Sendable {
     public var selectedDisplayID: UInt32?
     public var virtualDisplayWhenHeadless: Bool?
     public var displayID: UInt32?
-    public var frameBase64: String?
     public var audioSource: AudioCaptureSource?
     public var permissionAction: HostPermissionAction?
     public var accessibilityGranted: Bool?
@@ -149,6 +155,7 @@ public struct RemoteMessage: Codable, Sendable {
     public var signingPublicKey: String?
     public var ephemeralPublicKey: String?
     public var signature: String?
+    public var protocolVersion: Int?
 
     public init(
         type: RemoteMessageType,
@@ -182,7 +189,6 @@ public struct RemoteMessage: Codable, Sendable {
         selectedDisplayID: UInt32? = nil,
         virtualDisplayWhenHeadless: Bool? = nil,
         displayID: UInt32? = nil,
-        frameBase64: String? = nil,
         audioSource: AudioCaptureSource? = nil,
         permissionAction: HostPermissionAction? = nil,
         accessibilityGranted: Bool? = nil,
@@ -190,7 +196,8 @@ public struct RemoteMessage: Codable, Sendable {
         securePayload: String? = nil,
         signingPublicKey: String? = nil,
         ephemeralPublicKey: String? = nil,
-        signature: String? = nil
+        signature: String? = nil,
+        protocolVersion: Int? = nil
     ) {
         self.type = type
         self.value = value
@@ -223,7 +230,6 @@ public struct RemoteMessage: Codable, Sendable {
         self.selectedDisplayID = selectedDisplayID
         self.virtualDisplayWhenHeadless = virtualDisplayWhenHeadless
         self.displayID = displayID
-        self.frameBase64 = frameBase64
         self.audioSource = audioSource
         self.permissionAction = permissionAction
         self.accessibilityGranted = accessibilityGranted
@@ -232,18 +238,31 @@ public struct RemoteMessage: Codable, Sendable {
         self.signingPublicKey = signingPublicKey
         self.ephemeralPublicKey = ephemeralPublicKey
         self.signature = signature
+        self.protocolVersion = protocolVersion
     }
 
     public static func pair(code: String, deviceName: String, deviceID: String?) -> RemoteMessage {
-        RemoteMessage(type: .pair, code: code, deviceName: deviceName, deviceID: deviceID)
+        RemoteMessage(
+            type: .pair,
+            code: code,
+            deviceName: deviceName,
+            deviceID: deviceID,
+            protocolVersion: RemoteProtocol.version
+        )
     }
 
     public static func pairAck(success: Bool, token: String?, reason: String?) -> RemoteMessage {
-        RemoteMessage(type: .pairAck, token: token, success: success, reason: reason)
+        RemoteMessage(
+            type: .pairAck,
+            token: token,
+            success: success,
+            reason: reason,
+            protocolVersion: RemoteProtocol.version
+        )
     }
 
-    public static func secureControl(payloadBase64: String, token: String?) -> RemoteMessage {
-        RemoteMessage(type: .secureControl, token: token, securePayload: payloadBase64)
+    public static func secureControl(payloadBase64: String) -> RemoteMessage {
+        RemoteMessage(type: .secureControl, securePayload: payloadBase64)
     }
 
     public static func e2eHello(
@@ -259,7 +278,8 @@ public struct RemoteMessage: Codable, Sendable {
             deviceID: deviceID,
             signingPublicKey: signingPublicKey,
             ephemeralPublicKey: ephemeralPublicKey,
-            signature: signature
+            signature: signature,
+            protocolVersion: RemoteProtocol.version
         )
     }
 
@@ -276,7 +296,8 @@ public struct RemoteMessage: Codable, Sendable {
             deviceID: deviceID,
             signingPublicKey: signingPublicKey,
             ephemeralPublicKey: ephemeralPublicKey,
-            signature: signature
+            signature: signature,
+            protocolVersion: RemoteProtocol.version
         )
     }
 
@@ -376,10 +397,6 @@ public struct RemoteMessage: Codable, Sendable {
 
     public static func audioConfig(source: AudioCaptureSource, token: String?) -> RemoteMessage {
         RemoteMessage(type: .audioConfig, token: token, audioSource: source)
-    }
-
-    public static func screenFrame(frameBase64: String) -> RemoteMessage {
-        RemoteMessage(type: .screenFrame, frameBase64: frameBase64)
     }
 
     public static func permissionStatusRequest(token: String?) -> RemoteMessage {

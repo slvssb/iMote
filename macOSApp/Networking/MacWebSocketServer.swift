@@ -7,10 +7,21 @@ import Network
 final class MacWebSocketServer: @unchecked Sendable {
     private static let frameIntervalNanos: UInt64 = 16_666_667
     private static let adaptiveWindowTicks = 60
+    private static let maxClients = 8
+    private static let maxUnauthenticatedClients = 4
+    private static let maximumMessageBytes = 8 * 1024 * 1024
 
     struct ClientSnapshot: Sendable {
         let id: UUID
         let deviceName: String?
+        let isPaired: Bool
+    }
+
+    struct MediaStatus: Equatable, Sendable {
+        var selectedQuality: PreviewQualityMode
+        var effectiveQuality: PreviewQualityMode
+        var audioSource: AudioCaptureSource
+        var thermalOverrideActive: Bool
     }
 
     struct HostDisplayCatalogSnapshot: Sendable {
@@ -26,6 +37,8 @@ final class MacWebSocketServer: @unchecked Sendable {
     var onRuntimeError: ((String) -> Void)?
     var onCaptureRouteChange: ((String) -> Void)?
     var onDisplayCatalogChange: ((HostDisplayCatalogSnapshot) -> Void)?
+    var onMediaStatusChange: ((MediaStatus) -> Void)?
+    var onIdentityPinned: ((String, Bool) -> Void)?
 
     private struct ClientContext {
         let id: UUID
@@ -33,12 +46,22 @@ final class MacWebSocketServer: @unchecked Sendable {
         var token: String?
         var deviceName: String?
         var secureSession: SecureSession?
+        var outstandingBytes: Int = 0
+    }
+
+    private struct ClientMediaRequest {
+        var quality: PreviewQualityMode?
+        var zoom: Double?
+        var audio: AudioCaptureSource?
     }
 
     private struct SecureSession {
         let clientDeviceID: String
         let controlKey: SymmetricKey
         let mediaKey: SymmetricKey
+        var clientToHostControlCounter: UInt64 = 0
+        var hostToClientControlCounter: UInt64 = 0
+        var hostToClientMediaCounter: UInt64 = 0
     }
 
     private let pairingManager: PairingManager
@@ -50,6 +73,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private let virtualDisplayManager = VirtualDisplayManager()
     private let sessionPower = RemoteSessionPowerAssertion()
     private let queue = DispatchQueue(label: "remote.keyboard.mac.ws")
+    private let queueSpecificKey = DispatchSpecificKey<Void>()
     private var thermalObserver: NSObjectProtocol?
     private var workspaceSleepObserver: NSObjectProtocol?
     private var workspaceWakeObserver: NSObjectProtocol?
@@ -60,24 +84,30 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var listener: NWListener?
     private var listenerPort: UInt16 = 8989
     private var clients: [UUID: ClientContext] = [:]
+    private var mediaRequests: [UUID: ClientMediaRequest] = [:]
+    private var mediaOwnerID: UUID?
     private var frameTimer: DispatchSourceTimer?
     private var isFrameCaptureInFlight = false
     private var consecutiveFrameFailures = 0
     private var userSelectedQualityMode: PreviewQualityMode = .ultra
     private var effectiveQualityMode: PreviewQualityMode = .ultra
     private var requestedPreviewZoomLevel: Double = 1.0
+    private var appliedPreviewZoomLevel: Double = -1
     private var selectedAudioCaptureSource: AudioCaptureSource = .off
     private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     private var isThermalOverrideActive = false
     private var previewCaptureMaxWidth: CGFloat = 1920
     private var adaptiveBitrateScale: Double = 1.0
+    private var sendPressureScale: Double = 1.0
+    private var videoPressureLatched = false
+    private let videoDropOutstandingBytes = 750_000
     private var adaptiveWindowTickCount = 0
     private var adaptiveWindowSkippedCount = 0
     private var adaptiveWindowEncodedCount = 0
     private var streamStatusHeartbeatTickCount = 0
     private var audioDebugSentConfigCount = 0
     private var audioDebugSentFrameCount = 0
-    private var localSigningPrivateKey = MacWebSocketServer.loadOrCreateSigningPrivateKey()
+    private let localSigningPrivateKey: Curve25519.Signing.PrivateKey
     private let hostDeviceID = MacWebSocketServer.loadOrCreateHostDeviceID()
     private var isSystemSleeping = false
     private var isDisplaySleeping = false
@@ -113,6 +143,15 @@ final class MacWebSocketServer: @unchecked Sendable {
         self.pairingManager = pairingManager
         self.injector = injector
         self.accessibilityPermissionManager = accessibilityPermissionManager
+        queue.setSpecific(key: queueSpecificKey, value: ())
+        let identity = SigningIdentityStore.loadOrCreate(
+            account: "host-signing",
+            legacyDefaultsKey: "remoteKeyboard.mac.signingPrivateKey"
+        )
+        self.localSigningPrivateKey = identity.key
+        if identity.didDiscardLegacyKey {
+            pairingManager.clearTrustedDevices()
+        }
 
         h264Encoder.onPacket = { [weak self] packet in
             guard let self else { return }
@@ -150,8 +189,8 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         Task {
-            await screenCaptureProvider.setAudioSampleHandler { [weak self] sampleBuffer in
-                self?.handleAudioSampleBuffer(sampleBuffer)
+            await screenCaptureProvider.setAudioSampleHandler { [weak self] sampleBuffer, origin in
+                self?.handleAudioSampleBuffer(sampleBuffer, origin: origin)
             }
             await screenCaptureProvider.setAudioCaptureSource(self.selectedAudioCaptureSource)
         }
@@ -248,6 +287,12 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     func start(port: UInt16 = 8989) throws {
+        try onQueue {
+            try self.startOnQueue(port: port)
+        }
+    }
+
+    private func startOnQueue(port: UInt16) throws {
         listenerPort = port
         if listener != nil {
             return
@@ -263,8 +308,12 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         let wsOptions = NWProtocolWebSocket.Options()
         wsOptions.autoReplyPing = true
+        wsOptions.maximumMessageSize = Self.maximumMessageBytes
         let parameters = NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
+        // Wildcard bind. Leaving requiredInterface unset accepts Wi-Fi, Ethernet,
+        // and Tailscale's utun interface. Bonjour advertisement stays local-only.
+        parameters.acceptLocalOnly = false
 
         let wsListener = try NWListener(using: parameters, on: listenPort)
         wsListener.service = NWListener.Service(name: Host.current().localizedName ?? "Mac Keyboard", type: "_rkbd._tcp")
@@ -274,7 +323,8 @@ final class MacWebSocketServer: @unchecked Sendable {
             let description: String
             switch state {
             case .ready:
-                description = "Listening on port \(port)"
+                description = "Listening on port \(port) (all interfaces)"
+                self.publishMediaStatus()
             case .failed(let error):
                 description = "Listener failed: \(error.localizedDescription)"
             case .cancelled:
@@ -304,30 +354,40 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     func stop() {
-        isListenerRunning = false
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.clients.values.forEach { context in
-                context.connection.cancel()
-            }
-            self.clients.removeAll()
-            self.listener?.cancel()
-            self.listener = nil
-            self.stopFrameBroadcasting()
-            Task { [weak self] in
-                await self?.screenCaptureProvider.stopCapture()
-            }
-            self.h264Encoder.stop()
-            self.aacEncoder.stop()
-            self.sessionPower.setRemoteSessionActive(false)
-            self.virtualDisplayManager.tearDown()
-            self.publishClients()
+        onQueue {
+            self.stopOnQueue()
         }
     }
 
+    private func stopOnQueue() {
+        isListenerRunning = false
+        clients.values.forEach { context in
+            context.connection.cancel()
+        }
+        clients.removeAll()
+        mediaRequests.removeAll()
+        mediaOwnerID = nil
+        listener?.cancel()
+        listener = nil
+        stopFrameBroadcasting()
+        suspendCaptureBecauseNoPhonesRemain()
+        h264Encoder.stop()
+        aacEncoder.stop()
+        sessionPower.setRemoteSessionActive(false)
+        virtualDisplayManager.tearDown()
+        publishClients()
+    }
+
+    private func onQueue<T>(_ body: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: queueSpecificKey) != nil {
+            return try body()
+        }
+        return try queue.sync(execute: body)
+    }
+
     func setVirtualDisplayWhenHeadless(_ enabled: Bool) {
-        queue.async { [weak self] in
-            guard let self, self.isListenerRunning else { return }
+        onQueue {
+            guard self.isListenerRunning else { return }
             self.virtualDisplayWhenHeadless = enabled
             HostDisplayPreferences.save(virtualDisplayWhenHeadless: enabled)
             self.syncHeadlessDisplay()
@@ -337,8 +397,8 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     func selectCaptureDisplay(id: UInt32) {
-        queue.async { [weak self] in
-            guard let self, self.isListenerRunning else { return }
+        onQueue {
+            guard self.isListenerRunning else { return }
             self.preferredCaptureDisplayID = id
             let identity = self.cachedDisplayRecords.first { $0.info.id == id }?.identity
             self.preferredCaptureIdentity = identity?.isSpecific == true ? identity : nil
@@ -351,6 +411,13 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func accept(_ connection: NWConnection) {
+        let unauthenticated = clients.values.filter { $0.token == nil }.count
+        if clients.count >= Self.maxClients || unauthenticated >= Self.maxUnauthenticatedClients {
+            connection.cancel()
+            reportError("Rejected a connection because too many clients are already connected.")
+            return
+        }
+
         let id = UUID()
         let context = ClientContext(id: id, connection: connection, token: nil, deviceName: nil, secureSession: nil)
         clients[id] = context
@@ -376,11 +443,39 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func disconnect(id: UUID) {
+        injector.releasePressedMouseButtons(for: id)
         if let removed = clients.removeValue(forKey: id) {
             pairingManager.revoke(token: removed.token)
         }
         updateRemoteSessionPower()
+        mediaRequests.removeValue(forKey: id)
+        if mediaOwnerID == id {
+            mediaOwnerID = clients.keys.first { mediaRequests[$0] != nil }
+            applyStoredMediaRequest(mediaOwnerID.flatMap { mediaRequests[$0] })
+        }
         publishClients()
+        refreshCaptureForConnectedPhones()
+    }
+
+    private func refreshCaptureForConnectedPhones() {
+        let hasPairedPhone = clients.values.contains { $0.token != nil }
+        if hasPairedPhone {
+            Task { [weak self] in
+                await self?.screenCaptureProvider.resumeCaptureForPairedClient()
+            }
+        } else {
+            suspendCaptureBecauseNoPhonesRemain()
+        }
+    }
+
+    private func suspendCaptureBecauseNoPhonesRemain() {
+        selectedAudioCaptureSource = .off
+        h264Encoder.stop()
+        aacEncoder.stop()
+        publishMediaStatus()
+        Task { [weak self] in
+            await self?.screenCaptureProvider.suspendForIdleClients()
+        }
     }
 
     private func receiveNext(for id: UUID) {
@@ -454,6 +549,9 @@ final class MacWebSocketServer: @unchecked Sendable {
         case .displayControl:
             if isFromSecureChannel { handleDisplayControl(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .ping:
+            if clients[id]?.secureSession != nil, isFromSecureChannel == false {
+                return
+            }
             send(RemoteMessage(type: .pong), to: id)
         default:
             break
@@ -461,21 +559,27 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func handleSecureControl(_ message: RemoteMessage, from id: UUID) {
-        guard authorize(id: id, token: message.token),
-              let context = clients[id],
-              let secureSession = context.secureSession else {
+        guard var context = clients[id], var secureSession = context.secureSession else {
             send(.error("Unauthorized secure control session"), to: id)
             return
         }
         guard let payloadBase64 = message.securePayload,
               let combined = Data(base64Encoded: payloadBase64) else {
-            send(.error("Malformed secure control payload"), to: id)
+            failSecureChannel(id: id, reason: RemoteProtocol.secureChannelFailedReason)
             return
         }
 
         do {
-            let sealedBox = try ChaChaPoly.SealedBox(combined: combined)
-            let plaintext = try ChaChaPoly.open(sealedBox, using: secureSession.controlKey)
+            let plaintext = try SecureChannelCodec.open(
+                combined: combined,
+                using: secureSession.controlKey,
+                kind: .control,
+                direction: .clientToHost,
+                counter: secureSession.clientToHostControlCounter
+            )
+            secureSession.clientToHostControlCounter += 1
+            context.secureSession = secureSession
+            clients[id] = context
             let inner = try RemoteProtocolCodec.decode(plaintext)
             guard inner.type != .secureControl else {
                 send(.error("Nested secure control payload is not allowed"), to: id)
@@ -483,11 +587,26 @@ final class MacWebSocketServer: @unchecked Sendable {
             }
             handleDecodedMessage(inner, from: id, isFromSecureChannel: true)
         } catch {
-            send(.error("Unable to decrypt secure control payload"), to: id)
+            failSecureChannel(id: id, reason: RemoteProtocol.secureChannelFailedReason)
         }
     }
 
+    private func failSecureChannel(id: UUID, reason: String) {
+        guard let context = clients[id] else { return }
+        var cleared = context
+        cleared.secureSession = nil
+        clients[id] = cleared
+        send(.error(reason), to: id)
+        context.connection.cancel()
+        disconnect(id: id)
+    }
+
     private func handlePair(_ message: RemoteMessage, from id: UUID) {
+        guard message.protocolVersion == RemoteProtocol.version else {
+            send(.pairAck(success: false, token: nil, reason: RemoteProtocol.incompatibleClientReason), to: id)
+            return
+        }
+
         let submitted = message.code ?? ""
         let result = pairingManager.pair(code: submitted, deviceID: message.deviceID)
         guard var context = clients[id] else { return }
@@ -502,6 +621,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             sendStreamStatus(to: id)
             sendPermissionStatus(to: id)
             publishClients()
+            refreshCaptureForConnectedPhones()
             scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after iPhone connected")
         } else {
             send(.pairAck(success: false, token: nil, reason: result.reason), to: id)
@@ -509,6 +629,10 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func handleE2EHello(_ message: RemoteMessage, from id: UUID) {
+        guard message.protocolVersion == RemoteProtocol.version else {
+            send(.error(RemoteProtocol.incompatibleClientReason), to: id)
+            return
+        }
         guard authorize(id: id, token: message.token), let token = message.token else {
             send(.error("Unauthorized secure handshake"), to: id)
             return
@@ -524,19 +648,35 @@ final class MacWebSocketServer: @unchecked Sendable {
             return
         }
 
-        guard pairingManager.verifyOrPinSigningKey(deviceID: clientDeviceID, signingPublicKeyBase64: clientSigningKeyBase64) else {
-            send(.error("Client identity key mismatch"), to: id)
+        if let boundDeviceID = pairingManager.provisionalDeviceID(for: token), boundDeviceID != clientDeviceID {
+            send(.error("Handshake device does not match the paired device."), to: id)
             return
         }
 
+        let clientSigningKey: Curve25519.Signing.PublicKey
         do {
-            let clientSigningKey = try Curve25519.Signing.PublicKey(rawRepresentation: clientSigningKeyData)
-            let signaturePayload = Self.signaturePayload(token: token, deviceID: clientDeviceID, ephemeralPublicKey: clientEphemeralData)
-            guard clientSigningKey.isValidSignature(signatureData, for: signaturePayload) else {
-                send(.error("Invalid secure handshake signature"), to: id)
-                return
-            }
+            clientSigningKey = try Curve25519.Signing.PublicKey(rawRepresentation: clientSigningKeyData)
+        } catch {
+            send(.error("Malformed secure handshake payload"), to: id)
+            return
+        }
+        let signaturePayload = Self.signaturePayload(token: token, deviceID: clientDeviceID, ephemeralPublicKey: clientEphemeralData)
+        guard clientSigningKey.isValidSignature(signatureData, for: signaturePayload) else {
+            send(.error("Invalid secure handshake signature"), to: id)
+            return
+        }
 
+        let pin = pairingManager.pinSigningKeyAfterVerification(
+            deviceID: clientDeviceID,
+            signingPublicKeyBase64: clientSigningKeyBase64
+        )
+        guard pin != .mismatch else {
+            send(.error("Client identity key mismatch. Clear trusted devices on the Mac and pair again."), to: id)
+            return
+        }
+
+        var didConfirmTrust = false
+        do {
             let hostEphemeralPrivateKey = Curve25519.KeyAgreement.PrivateKey()
             let hostEphemeralPublicData = hostEphemeralPrivateKey.publicKey.rawRepresentation
             let clientEphemeralPublicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: clientEphemeralData)
@@ -545,15 +685,27 @@ final class MacWebSocketServer: @unchecked Sendable {
             let controlKey = sharedSecret.hkdfDerivedSymmetricKey(
                 using: SHA256.self,
                 salt: salt,
-                sharedInfo: Data("iMote.e2e.control.v1".utf8),
+                sharedInfo: Data("iMote.e2e.control.v2".utf8),
                 outputByteCount: 32
             )
             let mediaKey = sharedSecret.hkdfDerivedSymmetricKey(
                 using: SHA256.self,
                 salt: salt,
-                sharedInfo: Data("iMote.e2e.media.v1".utf8),
+                sharedInfo: Data("iMote.e2e.media.v2".utf8),
                 outputByteCount: 32
             )
+
+            guard pairingManager.confirmTrustedDeviceAfterHandshake(token: token, deviceID: clientDeviceID) else {
+                if pin == .pinnedNew {
+                    pairingManager.rollbackNewSigningPin(deviceID: clientDeviceID)
+                }
+                send(.error("Handshake device does not match the paired device."), to: id)
+                return
+            }
+            didConfirmTrust = true
+            if let deviceName = clients[id]?.deviceName {
+                pairingManager.noteTrustedDevice(deviceID: clientDeviceID, name: deviceName)
+            }
 
             guard var context = clients[id] else { return }
             context.secureSession = SecureSession(clientDeviceID: clientDeviceID, controlKey: controlKey, mediaKey: mediaKey)
@@ -574,7 +726,15 @@ final class MacWebSocketServer: @unchecked Sendable {
             ), to: id)
             sendStreamStatus(to: id)
             publishClients()
+            let fingerprint = IdentityFingerprint.displayString(forPublicKey: clientSigningKeyData)
+            let isNewPin = pin == .pinnedNew
+            Task { @MainActor in
+                self.onIdentityPinned?(fingerprint, isNewPin)
+            }
         } catch {
+            if didConfirmTrust == false, pin == .pinnedNew {
+                pairingManager.rollbackNewSigningPin(deviceID: clientDeviceID)
+            }
             send(.error("Failed to establish secure channel"), to: id)
         }
     }
@@ -644,7 +804,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         let modifiers = message.modifiers ?? []
 
         do {
-            try injector.injectMouseClick(button: button, modifiers: modifiers, action: action)
+            try injector.injectMouseClick(button: button, modifiers: modifiers, action: action, clientID: id)
         } catch {
             send(.error(error.localizedDescription), to: id)
         }
@@ -678,11 +838,20 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard let mode = message.qualityMode else { return }
-        userSelectedQualityMode = mode
-        if let zoomLevel = message.previewZoomLevel {
-            requestedPreviewZoomLevel = min(max(zoomLevel, 1.0), 3.0)
+        let zoom = min(max(message.previewZoomLevel ?? requestedPreviewZoomLevel, 1.0), 3.0)
+        if mediaRequestConflicts(with: id, quality: mode, zoom: zoom, audio: nil) {
+            send(.error("Another iPhone is already controlling preview quality."), to: id)
+            return
         }
+        var request = mediaRequests[id] ?? ClientMediaRequest()
+        request.quality = mode
+        request.zoom = zoom
+        mediaRequests[id] = request
+        claimMediaOwner(id)
+        userSelectedQualityMode = mode
+        requestedPreviewZoomLevel = zoom
         applyEffectiveQualityMode()
+        publishMediaStatus()
     }
 
     private func handleStreamResync(_ message: RemoteMessage, from id: UUID) {
@@ -704,11 +873,21 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard let source = message.audioSource else { return }
+        if mediaRequestConflicts(with: id, quality: nil, zoom: nil, audio: source) {
+            send(.error("Another iPhone is already controlling the audio source."), to: id)
+            return
+        }
+        var request = mediaRequests[id] ?? ClientMediaRequest()
+        request.audio = source
+        mediaRequests[id] = request
+        claimMediaOwner(id)
         selectedAudioCaptureSource = source
+        aacEncoder.resetMix()
         Task {
             await screenCaptureProvider.setAudioCaptureSource(source)
         }
         aacEncoder.requestStreamResync()
+        publishMediaStatus()
     }
 
     private func handlePermissionStatusRequest(_ message: RemoteMessage, from id: UUID) {
@@ -752,11 +931,17 @@ final class MacWebSocketServer: @unchecked Sendable {
         guard let action = message.trustAction else { return }
         switch action {
         case .forgetCurrentDevice:
-            guard let deviceID = message.deviceID, deviceID.isEmpty == false else {
-                send(.error("Missing device identifier for trust action"), to: id)
+            guard let session = clients[id]?.secureSession else {
+                send(.error("Unauthorized secure control session"), to: id)
                 return
             }
-            pairingManager.removeTrustedDevice(deviceID: deviceID)
+            if let requested = message.deviceID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               requested.isEmpty == false,
+               requested != session.clientDeviceID {
+                send(.error("You can only forget this iPhone."), to: id)
+                return
+            }
+            pairingManager.removeTrustedDevice(deviceID: session.clientDeviceID)
         }
     }
 
@@ -783,6 +968,55 @@ final class MacWebSocketServer: @unchecked Sendable {
         sendStreamStatus(to: id)
     }
 
+    private func mediaRequestConflicts(
+        with id: UUID,
+        quality: PreviewQualityMode?,
+        zoom: Double?,
+        audio: AudioCaptureSource?
+    ) -> Bool {
+        guard let owner = mediaOwnerID, owner != id, clients[owner] != nil else { return false }
+        let ownerRequest = mediaRequests[owner]
+        if let quality {
+            let ownerQuality = ownerRequest?.quality ?? userSelectedQualityMode
+            if ownerQuality != quality { return true }
+        }
+        if let zoom {
+            let ownerZoom = ownerRequest?.zoom ?? requestedPreviewZoomLevel
+            if abs(ownerZoom - zoom) > 0.01 { return true }
+        }
+        if let audio {
+            let ownerAudio = ownerRequest?.audio ?? selectedAudioCaptureSource
+            if ownerAudio != audio { return true }
+        }
+        return false
+    }
+
+    private func claimMediaOwner(_ id: UUID) {
+        if mediaOwnerID == nil || clients[mediaOwnerID!] == nil {
+            mediaOwnerID = id
+        }
+    }
+
+    private func applyStoredMediaRequest(_ request: ClientMediaRequest?) {
+        guard let request else { return }
+        if let quality = request.quality {
+            userSelectedQualityMode = quality
+        }
+        if let zoom = request.zoom {
+            requestedPreviewZoomLevel = zoom
+        }
+        if let audio = request.audio, audio != selectedAudioCaptureSource {
+            selectedAudioCaptureSource = audio
+            aacEncoder.resetMix()
+            Task {
+                await screenCaptureProvider.setAudioCaptureSource(audio)
+            }
+            aacEncoder.requestStreamResync()
+        }
+        applyEffectiveQualityMode()
+        publishMediaStatus()
+    }
+
     private func authorize(id: UUID, token: String?) -> Bool {
         guard let context = clients[id] else {
             return false
@@ -801,10 +1035,46 @@ final class MacWebSocketServer: @unchecked Sendable {
         if let deviceIDOverride {
             message.deviceID = deviceIDOverride
         }
+        if shouldProtect(message, clientID: id) {
+            sendEncryptedControl(message, to: id)
+            return
+        }
         guard let payload = try? RemoteProtocolCodec.encode(message) else {
             return
         }
         sendBinaryFrame(payload, to: id)
+    }
+
+    private func shouldProtect(_ message: RemoteMessage, clientID: UUID) -> Bool {
+        guard clients[clientID]?.secureSession != nil else { return false }
+        switch message.type {
+        case .pair, .pairAck, .e2eHello, .e2eHelloAck:
+            return false
+        default:
+            return true
+        }
+    }
+
+    private func sendEncryptedControl(_ message: RemoteMessage, to id: UUID) {
+        guard var context = clients[id], var session = context.secureSession else { return }
+        do {
+            let plaintext = try RemoteProtocolCodec.encode(message)
+            let combined = try SecureChannelCodec.seal(
+                plaintext,
+                using: session.controlKey,
+                kind: .control,
+                direction: .hostToClient,
+                counter: session.hostToClientControlCounter
+            )
+            session.hostToClientControlCounter += 1
+            context.secureSession = session
+            clients[id] = context
+            let outer = RemoteMessage.secureControl(payloadBase64: combined.base64EncodedString())
+            guard let payload = try? RemoteProtocolCodec.encode(outer) else { return }
+            sendBinaryFrame(payload, to: id)
+        } catch {
+            failSecureChannel(id: id, reason: RemoteProtocol.secureChannelFailedReason)
+        }
     }
 
     private func sendBinaryFrame(_ payload: Data, to id: UUID) {
@@ -817,27 +1087,104 @@ final class MacWebSocketServer: @unchecked Sendable {
             identifier: "remoteKeyboard",
             metadata: [metadata]
         )
+        if Self.isDroppableVideoFrame(payload), context.outstandingBytes > videoDropOutstandingBytes {
+            noteVideoSendPressure()
+            return
+        }
+
         let outboundPayload: Data
-        if let secureSession = context.secureSession, Self.isMediaPacket(payload) {
+        if var session = context.secureSession, Self.isMediaPacket(payload) {
             do {
-                let sealedBox = try ChaChaPoly.seal(payload, using: secureSession.mediaKey)
+                let combined = try SecureChannelCodec.seal(
+                    payload,
+                    using: session.mediaKey,
+                    kind: .media,
+                    direction: .hostToClient,
+                    counter: session.hostToClientMediaCounter
+                )
+                session.hostToClientMediaCounter += 1
+                var updated = context
+                updated.secureSession = session
+                clients[id] = updated
                 var packet = Data([BinaryPacketMarker.encryptedMedia])
-                packet.append(sealedBox.combined)
+                packet.append(combined)
                 outboundPayload = packet
             } catch {
-                reportError("Failed to encrypt media packet")
+                failSecureChannel(id: id, reason: RemoteProtocol.secureChannelFailedReason)
                 return
             }
         } else {
             outboundPayload = payload
         }
 
+        let byteCount = outboundPayload.count
+        if var current = clients[id] {
+            current.outstandingBytes += byteCount
+            clients[id] = current
+        }
         context.connection.send(
             content: outboundPayload,
             contentContext: contentContext,
             isComplete: true,
-            completion: .idempotent
+            completion: .contentProcessed { [weak self] _ in
+                self?.queue.async {
+                    guard var current = self?.clients[id] else { return }
+                    current.outstandingBytes = max(0, current.outstandingBytes - byteCount)
+                    self?.clients[id] = current
+                    self?.refreshBitrateFromSendPressure()
+                }
+            }
         )
+    }
+
+    private func noteVideoSendPressure() {
+        videoPressureLatched = true
+        refreshBitrateFromSendPressure()
+    }
+
+    private func refreshBitrateFromSendPressure() {
+        let pending = clients.values.map(\.outstandingBytes).max() ?? 0
+        if pending > videoDropOutstandingBytes {
+            videoPressureLatched = true
+        } else if videoPressureLatched, pending < 200_000 {
+            videoPressureLatched = false
+            h264Encoder.requestStreamResync()
+        }
+
+        var next = sendPressureScale
+        if pending > 2_000_000 {
+            next -= 0.12
+        } else if pending > videoDropOutstandingBytes {
+            next -= 0.06
+        } else if pending < 180_000 {
+            next += 0.04
+        }
+        next = min(max(next, 0.35), 1.0)
+        guard abs(next - sendPressureScale) > 0.02 else { return }
+        sendPressureScale = next
+        h264Encoder.setAdaptiveBitrateScale(min(adaptiveBitrateScale, sendPressureScale))
+    }
+
+    private static func isDroppableVideoFrame(_ payload: Data) -> Bool {
+        guard payload.first == BinaryPacketMarker.h264Frame, payload.count > 5 else { return false }
+        var offset = 1
+        var sawKeyframe = false
+        while offset + 4 < payload.count {
+            let length = (Int(payload[offset]) << 24)
+                | (Int(payload[offset + 1]) << 16)
+                | (Int(payload[offset + 2]) << 8)
+                | Int(payload[offset + 3])
+            let nalIndex = offset + 4
+            guard length > 0, nalIndex < payload.count else { return false }
+            let nalType = payload[nalIndex] & 0x1F
+            if nalType == 5 {
+                sawKeyframe = true
+            }
+            let next = nalIndex + length
+            guard next > offset else { return false }
+            offset = next
+        }
+        return sawKeyframe == false
     }
 
     private static func isMediaPacket(_ payload: Data) -> Bool {
@@ -850,13 +1197,17 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private static func signaturePayload(token: String, deviceID: String, ephemeralPublicKey: Data) -> Data {
         var payload = Data()
-        payload.append(contentsOf: Data("iMote.e2e.handshake.v1|".utf8))
+        payload.append(contentsOf: Data("iMote.e2e.handshake.v2|".utf8))
         payload.append(contentsOf: Data(token.utf8))
         payload.append(contentsOf: Data("|".utf8))
         payload.append(contentsOf: Data(deviceID.utf8))
         payload.append(contentsOf: Data("|".utf8))
         payload.append(ephemeralPublicKey)
         return payload
+    }
+
+    var localSigningFingerprint: String {
+        IdentityFingerprint.displayString(forPublicKey: localSigningPrivateKey.publicKey.rawRepresentation)
     }
 
     private static func loadOrCreateHostDeviceID() -> String {
@@ -869,21 +1220,10 @@ final class MacWebSocketServer: @unchecked Sendable {
         return created
     }
 
-    private static func loadOrCreateSigningPrivateKey() -> Curve25519.Signing.PrivateKey {
-        let key = "remoteKeyboard.mac.signingPrivateKey"
-        if let stored = UserDefaults.standard.string(forKey: key),
-           let data = Data(base64Encoded: stored),
-           let existing = try? Curve25519.Signing.PrivateKey(rawRepresentation: data) {
-            return existing
-        }
-        let created = Curve25519.Signing.PrivateKey()
-        UserDefaults.standard.set(created.rawRepresentation.base64EncodedString(), forKey: key)
-        return created
-    }
 
     private func publishClients() {
         let snapshot = clients.values.map { context in
-            ClientSnapshot(id: context.id, deviceName: context.deviceName)
+            ClientSnapshot(id: context.id, deviceName: context.deviceName, isPaired: context.token != nil)
         }
         Task { @MainActor in
             self.onClientsChange?(snapshot)
@@ -933,6 +1273,12 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard pairedClientIDs.isEmpty == false else { return }
+        guard h264Encoder.canAcceptFrame() else {
+            adaptiveWindowTickCount += 1
+            adaptiveWindowSkippedCount += 1
+            updateAdaptiveBitrateIfNeeded()
+            return
+        }
         adaptiveWindowTickCount += 1
         guard isFrameCaptureInFlight == false else {
             adaptiveWindowSkippedCount += 1
@@ -982,8 +1328,11 @@ final class MacWebSocketServer: @unchecked Sendable {
 
                 self.consecutiveFrameFailures = 0
                 self.publishCaptureActivityIfNeeded()
-                self.h264Encoder.encode(pixelBuffer: framePixelBuffer.value)
-                self.adaptiveWindowEncodedCount += 1
+                if self.h264Encoder.encode(pixelBuffer: framePixelBuffer.value) {
+                    self.adaptiveWindowEncodedCount += 1
+                } else {
+                    self.adaptiveWindowSkippedCount += 1
+                }
                 self.updateAdaptiveBitrateIfNeeded()
             }
         }
@@ -1108,7 +1457,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         nextScale = min(max(nextScale, 0.45), 1.0)
         if abs(nextScale - adaptiveBitrateScale) > 0.01 {
             adaptiveBitrateScale = nextScale
-            h264Encoder.setAdaptiveBitrateScale(adaptiveBitrateScale)
+            h264Encoder.setAdaptiveBitrateScale(min(adaptiveBitrateScale, sendPressureScale))
         }
 
         adaptiveWindowTickCount = 0
@@ -1292,37 +1641,45 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         applyEffectiveQualityMode()
+        publishMediaStatus()
         sendStreamStatusToAllPairedClients()
     }
 
     private func applyEffectiveQualityMode() {
         let nextMode: PreviewQualityMode = isThermalOverrideActive ? .balanced : userSelectedQualityMode
-        guard effectiveQualityMode != nextMode else { return }
-        effectiveQualityMode = nextMode
-
+        let zoom = requestedPreviewZoomLevel
+        let nextWidth: CGFloat
+        let nextProfile: H264FrameEncoder.QualityProfile
         switch nextMode {
         case .balanced:
-            if requestedPreviewZoomLevel >= 2.5 {
-                previewCaptureMaxWidth = 1680
-            } else {
-                previewCaptureMaxWidth = 1440
-            }
-            h264Encoder.setQualityProfile(.balanced)
+            nextWidth = zoom >= 2.5 ? 1680 : 1440
+            nextProfile = .balanced
         case .ultra:
-            if requestedPreviewZoomLevel >= 2.5 {
-                previewCaptureMaxWidth = 2560
-                h264Encoder.setQualityProfile(.ultraZoom)
-            } else if requestedPreviewZoomLevel >= 1.5 {
-                previewCaptureMaxWidth = 2240
-                h264Encoder.setQualityProfile(.ultra)
+            if zoom >= 2.5 {
+                nextWidth = 2560
+                nextProfile = .ultraZoom
+            } else if zoom >= 1.5 {
+                nextWidth = 2240
+                nextProfile = .ultra
             } else {
-                previewCaptureMaxWidth = 1920
-                h264Encoder.setQualityProfile(.ultra)
+                nextWidth = 1920
+                nextProfile = .ultra
             }
         }
+
+        let modeChanged = effectiveQualityMode != nextMode
+        let zoomChanged = abs(appliedPreviewZoomLevel - zoom) > 0.01
+        let widthChanged = abs(previewCaptureMaxWidth - nextWidth) > 0.5
+        guard modeChanged || zoomChanged || widthChanged else { return }
+
+        effectiveQualityMode = nextMode
+        appliedPreviewZoomLevel = zoom
+        previewCaptureMaxWidth = nextWidth
+        h264Encoder.setQualityProfile(nextProfile)
+        publishMediaStatus()
     }
 
-    private func handleAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
+    private func handleAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer, origin: CapturedAudioOrigin) {
         queue.async { [weak self] in
             guard let self else { return }
             guard self.selectedAudioCaptureSource != .off else { return }
@@ -1330,7 +1687,23 @@ final class MacWebSocketServer: @unchecked Sendable {
                 context.token != nil
             }
             guard hasPairedClients else { return }
-            self.aacEncoder.encode(sampleBuffer: sampleBuffer.value)
+            if self.selectedAudioCaptureSource == .systemAndMicrophone {
+                self.aacEncoder.encodeMixed(sampleBuffer: sampleBuffer.value, origin: origin)
+            } else {
+                self.aacEncoder.encode(sampleBuffer: sampleBuffer.value)
+            }
+        }
+    }
+
+    private func publishMediaStatus() {
+        let status = MediaStatus(
+            selectedQuality: userSelectedQualityMode,
+            effectiveQuality: effectiveQualityMode,
+            audioSource: selectedAudioCaptureSource,
+            thermalOverrideActive: isThermalOverrideActive
+        )
+        Task { @MainActor in
+            self.onMediaStatusChange?(status)
         }
     }
 
@@ -1342,8 +1715,8 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private func assertHostPermissionsForControl(to id: UUID) -> Bool {
         let status = currentHostPermissionStatus()
-        guard status.accessibilityGranted, status.screenRecordingGranted else {
-            send(.error("Host permissions are required before remote control can start."), to: id)
+        guard status.accessibilityGranted else {
+            send(.error("Accessibility permission is required before remote control can start."), to: id)
             sendPermissionStatus(to: id)
             return false
         }

@@ -33,6 +33,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     @Published var connectionTargetMode: ConnectionTargetMode = .localDiscovery
     @Published var manualHost = ""
     @Published var manualPortText = "8989"
+    @Published private(set) var savedHosts: [SavedRemoteHost] = []
     @Published var pairingCode = ""
     @Published var activeModifiers: Set<RemoteModifier> = []
     @Published var lastError: String?
@@ -46,6 +47,8 @@ final class IOSKeyboardViewModel: ObservableObject {
         screenRecordingGranted: false
     )
     @Published private(set) var hasCompletedPermissionGate = false
+    @Published var pairedHostFingerprint: String?
+    @Published var pairedHostFingerprintIsNew = false
 
     let screenPreview = ScreenPreviewState()
 
@@ -80,11 +83,16 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     var isTrustedAutoReconnect: Bool {
-        hasTrustedSession && pairingCode.isEmpty
+        hasTrustedSessionLocally && pairingCode.isEmpty
     }
 
     var hasTrustedSessionLocally: Bool {
-        hasTrustedSession
+        _ = trustedEndpointStamp
+        return TrustedHostStore.isTrusted(endpointKeys: currentEndpointKeys())
+    }
+
+    var localSigningFingerprint: String {
+        client.localSigningFingerprint
     }
 
     var shouldShowPermissionGate: Bool {
@@ -92,7 +100,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     var canContinueAfterPermissionGate: Bool {
-        permissionGatePhase == .checklist && hostPermissionState.allGranted
+        permissionGatePhase == .checklist && hostPermissionState.accessibilityGranted
     }
 
     private let browser = BonjourServiceBrowser()
@@ -106,13 +114,30 @@ final class IOSKeyboardViewModel: ObservableObject {
     private var permissionPollTask: Task<Void, Never>?
     private var hasSeenMissingRequiredPermissions = false
 
-    private let trustedSessionKey = "remoteKeyboard.trustedSession"
-    private var hasTrustedSession: Bool {
-        get { UserDefaults.standard.bool(forKey: trustedSessionKey) }
-        set { UserDefaults.standard.set(newValue, forKey: trustedSessionKey) }
-    }
+    private let connectionModeKey = "remoteKeyboard.connectionTargetMode"
+    private let manualHostKey = "remoteKeyboard.manualHost"
+    private let manualPortKey = "remoteKeyboard.manualPort"
+    @Published private var trustedEndpointStamp = 0
 
     init() {
+        let defaults = UserDefaults.standard
+        if let rawMode = defaults.string(forKey: connectionModeKey),
+           let mode = ConnectionTargetMode(rawValue: rawMode) {
+            connectionTargetMode = mode
+        }
+        if let storedHost = defaults.string(forKey: manualHostKey) {
+            manualHost = storedHost
+        }
+        if let storedPort = defaults.string(forKey: manualPortKey), storedPort.isEmpty == false {
+            manualPortText = storedPort
+        }
+        savedHosts = SavedRemoteHostStore.load()
+        defaults.removeObject(forKey: "remoteKeyboard.trustedSession")
+
+        client.onTrustedEndpointsChanged = { [weak self] in
+            self?.trustedEndpointStamp += 1
+        }
+
         browser.$services
             .receive(on: RunLoop.main)
             .sink { [weak self] updated in
@@ -121,10 +146,11 @@ final class IOSKeyboardViewModel: ObservableObject {
                 if self.selectedService == nil {
                     self.selectedService = updated.first
                 } else if let selected = self.selectedService {
-                    let stillPresent = updated.contains { service in
-                        service.host == selected.host && service.port == selected.port
-                    }
-                    if stillPresent == false {
+                    if let refreshed = updated.first(where: { service in
+                        service.name == selected.name && service.port == selected.port
+                    }) {
+                        self.selectedService = refreshed
+                    } else {
                         self.selectedService = updated.first
                     }
                 }
@@ -163,7 +189,6 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.isUserInitiatedDisconnecting = false
                     self.suppressExpectedDisconnectErrors = false
                     self.connectionLabel = "Paired and ready (E2E)"
-                    self.hasTrustedSession = true
                     self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
                     self.client.sendAudioConfig(source: self.audioCaptureSource)
                     self.client.sendStreamResync()
@@ -184,12 +209,6 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.screenPreview.reset()
                     self.aacAudioPlayer.stop()
                     self.resetPermissionGate()
-                    if self.hasTrustedSession,
-                       self.pairingCode.isEmpty,
-                       reason.localizedCaseInsensitiveContains("invalid pairing code") {
-                        self.hasTrustedSession = false
-                        self.client.disconnect(userInitiated: true)
-                    }
                 }
             }
             .store(in: &cancellables)
@@ -237,11 +256,6 @@ final class IOSKeyboardViewModel: ObservableObject {
             self.aacAudioPlayer.enqueueFrame(framePayload)
         }
 
-        client.onScreenFrame = { [weak self] frameData in
-            guard let self else { return }
-            self.screenPreview.consumeFrameData(frameData)
-        }
-
         client.onCursorPosition = { [weak self] x, y in
             guard let self else { return }
             self.screenPreview.updateCursorPosition(x: x, y: y)
@@ -255,6 +269,12 @@ final class IOSKeyboardViewModel: ObservableObject {
         client.onHostCaptureStatusChanged = { [weak self] message in
             guard let self else { return }
             self.screenPreview.applyDisplayCatalog(message)
+        }
+
+        client.onHostFingerprintPinned = { [weak self] fingerprint, isNew in
+            guard let self else { return }
+            self.pairedHostFingerprint = fingerprint
+            self.pairedHostFingerprintIsNew = isNew
         }
 
         client.onPermissionStatus = { [weak self] accessibilityGranted, screenRecordingGranted in
@@ -305,26 +325,27 @@ final class IOSKeyboardViewModel: ObservableObject {
             host = selectedService.host
             port = selectedService.port
         case .manualAddress:
-            let trimmedHost = manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmedHost.isEmpty == false else {
-                lastError = "Enter a remote host or IP address."
+            switch RemoteHostAddress.parse(hostField: manualHost, portField: manualPortText) {
+            case let .failure(failure):
+                lastError = failure.message
                 return
+            case let .success(address):
+                host = address.host
+                port = address.port
+                manualHost = address.host
+                manualPortText = String(address.port)
+                rememberRemoteHost(address)
             }
-            guard let parsedPort = Int(manualPortText), (1...65_535).contains(parsedPort) else {
-                lastError = "Port must be between 1 and 65535."
-                return
-            }
-            host = trimmedHost
-            port = parsedPort
         }
 
         isUserInitiatedDisconnecting = false
         suppressExpectedDisconnectErrors = false
 
+        let endpointKeys = currentEndpointKeys()
         let codeToUse: String
         if pairingCode.count == 6 {
             codeToUse = pairingCode
-        } else if pairingCode.isEmpty, hasTrustedSession {
+        } else if pairingCode.isEmpty, TrustedHostStore.isTrusted(endpointKeys: endpointKeys) {
             codeToUse = ""
         } else {
             lastError = "Pairing code must be 6 digits."
@@ -332,7 +353,62 @@ final class IOSKeyboardViewModel: ObservableObject {
         }
 
         lastError = nil
-        client.connect(host: host, port: port, pairingCode: codeToUse)
+        noteConnectionDraftChanged()
+        client.connect(host: host, port: port, pairingCode: codeToUse, trustedEndpointKeys: endpointKeys)
+    }
+
+    func currentEndpointKeys() -> [String] {
+        switch connectionTargetMode {
+        case .localDiscovery:
+            guard let selectedService else { return [] }
+            return [
+                TrustedHostStore.bonjourKey(name: selectedService.name, port: selectedService.port),
+                TrustedHostStore.endpointKey(host: selectedService.host, port: selectedService.port)
+            ]
+        case .manualAddress:
+            guard case let .success(address) = RemoteHostAddress.parse(hostField: manualHost, portField: manualPortText) else {
+                return []
+            }
+            return [TrustedHostStore.endpointKey(host: address.host, port: address.port)]
+        }
+    }
+
+    func selectSavedHost(_ host: SavedRemoteHost) {
+        connectionTargetMode = .manualAddress
+        manualHost = host.host
+        manualPortText = String(host.port)
+        noteConnectionDraftChanged()
+    }
+
+    func forgetSavedHost(_ host: SavedRemoteHost) {
+        savedHosts.removeAll { $0.id == host.id }
+        SavedRemoteHostStore.save(savedHosts)
+    }
+
+    func noteConnectionDraftChanged() {
+        let defaults = UserDefaults.standard
+        defaults.set(connectionTargetMode.rawValue, forKey: connectionModeKey)
+        defaults.set(manualHost, forKey: manualHostKey)
+        defaults.set(manualPortText, forKey: manualPortKey)
+    }
+
+    private func rememberRemoteHost(_ address: RemoteHostAddress) {
+        var hosts = savedHosts
+        if let index = hosts.firstIndex(where: { existing in
+            existing.host.caseInsensitiveCompare(address.host) == .orderedSame && existing.port == address.port
+        }) {
+            hosts[index].host = address.host
+            hosts[index].port = address.port
+            hosts[index].lastUsedAt = Date()
+        } else {
+            hosts.append(SavedRemoteHost(id: UUID(), host: address.host, port: address.port, lastUsedAt: Date()))
+        }
+        hosts.sort { $0.lastUsedAt > $1.lastUsedAt }
+        if hosts.count > SavedRemoteHostStore.limit {
+            hosts = Array(hosts.prefix(SavedRemoteHostStore.limit))
+        }
+        savedHosts = hosts
+        SavedRemoteHostStore.save(hosts)
     }
 
     func disconnect() {
@@ -359,20 +435,24 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     func handleCharacter(_ character: Character) {
-        let value = String(character)
         let modifiers = Array(activeModifiers)
-
-        if modifiers.isEmpty {
-            if let shiftedBaseKey = shiftedBaseKey(for: character) {
-                client.sendKey(shiftedBaseKey, modifiers: [.shift], action: .tap)
-            } else {
-                client.sendText(value)
-            }
+        if character == " " {
+            client.sendKey(KeyboardNamedKey.space.rawValue, modifiers: modifiers, action: .tap)
             return
         }
 
-        let keyName = normalizeKeyCharacter(character)
-        client.sendKey(keyName, modifiers: modifiers, action: .tap)
+        let shortcutModifiers = modifiers.filter { $0 != .shift }
+        if shortcutModifiers.isEmpty == false, character.isLetter {
+            client.sendKey(String(character).lowercased(), modifiers: modifiers, action: .tap)
+            return
+        }
+
+        if modifiers.isEmpty, shouldSendAsUnicodeText(character) {
+            client.sendText(String(character))
+            return
+        }
+
+        client.sendKey(String(character), modifiers: modifiers, action: .tap)
     }
 
     func handleBackspace() {
@@ -443,6 +523,14 @@ final class IOSKeyboardViewModel: ObservableObject {
         }
     }
 
+    func notePreviewDidNotStart() {
+        guard screenPreview.hasFrame == false else { return }
+        screenPreview.noteCaptureDidNotStart()
+        if lastError == nil {
+            lastError = "Screen preview did not start. Keyboard and trackpad are ready. Check Screen Recording on the Mac."
+        }
+    }
+
     func requestStreamResync() {
         guard isPaired else { return }
         client.sendStreamResync()
@@ -454,14 +542,31 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     func forgetTrustedSessionOnPhone() {
-        hasTrustedSession = false
-        pairingCode = ""
+        forgetStoredTrust(matching: currentEndpointKeys())
     }
 
-    func forgetCurrentDeviceTrustOnMac() {
-        client.sendForgetCurrentDeviceTrust()
-        hasTrustedSession = false
+    func forgetCurrentDeviceTrustOnMac() async -> Bool {
+        let endpointKeys = client.connectedEndpointKeys
+        let sent = await client.sendForgetCurrentDeviceTrust()
+        guard sent else {
+            if lastError == nil {
+                lastError = "Could not tell the Mac to forget this iPhone. Still connected."
+            }
+            return false
+        }
+        forgetStoredTrust(matching: endpointKeys)
+        return true
+    }
+
+    private func forgetStoredTrust(matching endpointKeys: [String]) {
+        let removed = TrustedHostStore.forgetHosts(matching: endpointKeys)
+        for signingKey in removed {
+            client.clearHostPins(matchingSigningKey: signingKey)
+        }
         pairingCode = ""
+        pairedHostFingerprint = nil
+        pairedHostFingerprintIsNew = false
+        trustedEndpointStamp += 1
     }
 
     func refreshHostPermissionStatus() {
@@ -531,27 +636,12 @@ final class IOSKeyboardViewModel: ObservableObject {
         permissionPollTask = nil
     }
 
-    private func shiftedBaseKey(for character: Character) -> String? {
-        let value = String(character)
-
-        if value.count == 1,
-           let scalar = value.unicodeScalars.first,
-           CharacterSet.uppercaseLetters.contains(scalar) {
-            return value.lowercased()
+    private func shouldSendAsUnicodeText(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first, character.unicodeScalars.count == 1 else {
+            return true
         }
-
-        let shiftedSymbolMap: [Character: String] = [
-            "~": "`", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
-            "_": "-", "+": "=", "{": "[", "}": "]", "|": "\\", ":": ";", "\"": "'", "<": ",", ">": ".", "?": "/"
-        ]
-
-        return shiftedSymbolMap[character]
-    }
-
-    private func normalizeKeyCharacter(_ character: Character) -> String {
-        if character == " " {
-            return KeyboardNamedKey.space.rawValue
-        }
-        return String(character).lowercased()
+        if CharacterSet.lowercaseLetters.contains(scalar) { return true }
+        if scalar.value < 0x20 || scalar.value > 0x7E { return true }
+        return false
     }
 }
