@@ -1123,7 +1123,7 @@ private struct MacCenteredLogoOverlay: View {
             guard Task.isCancelled == false else { return }
 
             if shouldForgetOnControlledDisconnect {
-                viewModel.forgetCurrentDeviceTrustOnMac()
+                await viewModel.forgetCurrentDeviceTrustOnMac()
                 shouldForgetOnControlledDisconnect = false
             }
             if isControlledDisconnectFlow {

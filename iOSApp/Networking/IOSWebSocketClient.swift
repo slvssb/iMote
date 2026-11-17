@@ -52,6 +52,10 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private var hasCompletedSecureHandshake = false
     private let fallbackDeviceID = UUID().uuidString
 
+    private enum EncodedWireError: Error {
+        case secureChannelNotReady
+    }
+
     private enum BinaryPacketMarker {
         static let encryptedMedia: UInt8 = 0x7E
         static let h264Config: UInt8 = 0x10
@@ -149,8 +153,13 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(RemoteMessage.streamResync(token: pairedToken))
     }
 
-    func sendForgetCurrentDeviceTrust() {
-        sendMessage(RemoteMessage.trustControl(action: .forgetCurrentDevice, token: pairedToken, deviceID: deviceIdentifier))
+    func sendForgetCurrentDeviceTrust() async -> Bool {
+        let message = RemoteMessage.trustControl(
+            action: .forgetCurrentDevice,
+            token: pairedToken,
+            deviceID: deviceIdentifier
+        )
+        return await sendMessageAwaitingCompletion(message)
     }
 
     func sendAudioConfig(source: AudioCaptureSource) {
@@ -173,27 +182,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private func sendMessage(_ message: RemoteMessage) {
         guard let task else { return }
         do {
-            let outboundMessage: RemoteMessage
-            if shouldEncryptOutgoingControl(message: message) {
-                guard let key = controlChannelKey else {
-                    // Avoid leaking control intent before authenticated secure handshake is complete.
-                    return
-                }
-                let plaintext = try RemoteProtocolCodec.encode(message)
-                let combined = try SecureChannelCodec.seal(
-                    plaintext,
-                    using: key,
-                    kind: .control,
-                    direction: .clientToHost,
-                    counter: clientToHostControlCounter
-                )
-                clientToHostControlCounter += 1
-                outboundMessage = .secureControl(payloadBase64: combined.base64EncodedString())
-            } else {
-                outboundMessage = message
-            }
-
-            let payload = try RemoteProtocolCodec.encode(outboundMessage)
+            let payload = try encodedWireData(for: message)
             task.send(.data(payload)) { [weak self] error in
                 guard let self else { return }
                 if let error {
@@ -202,9 +191,51 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                     }
                 }
             }
+        } catch EncodedWireError.secureChannelNotReady {
+            return
         } catch {
             handleError(error.localizedDescription)
         }
+    }
+
+    private func sendMessageAwaitingCompletion(_ message: RemoteMessage) async -> Bool {
+        guard let task else { return false }
+        do {
+            let payload = try encodedWireData(for: message)
+            return await withCheckedContinuation { continuation in
+                task.send(.data(payload)) { error in
+                    continuation.resume(returning: error == nil)
+                }
+            }
+        } catch EncodedWireError.secureChannelNotReady {
+            return false
+        } catch {
+            handleError(error.localizedDescription)
+            return false
+        }
+    }
+
+    private func encodedWireData(for message: RemoteMessage) throws -> Data {
+        let outboundMessage: RemoteMessage
+        if shouldEncryptOutgoingControl(message: message) {
+            guard let key = controlChannelKey else {
+                // Avoid leaking control intent before authenticated secure handshake is complete.
+                throw EncodedWireError.secureChannelNotReady
+            }
+            let plaintext = try RemoteProtocolCodec.encode(message)
+            let combined = try SecureChannelCodec.seal(
+                plaintext,
+                using: key,
+                kind: .control,
+                direction: .clientToHost,
+                counter: clientToHostControlCounter
+            )
+            clientToHostControlCounter += 1
+            outboundMessage = .secureControl(payloadBase64: combined.base64EncodedString())
+        } else {
+            outboundMessage = message
+        }
+        return try RemoteProtocolCodec.encode(outboundMessage)
     }
 
     private func listen(on task: URLSessionWebSocketTask, generation: UInt64) {
