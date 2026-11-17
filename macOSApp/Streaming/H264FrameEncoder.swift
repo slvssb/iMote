@@ -61,7 +61,12 @@ final class H264FrameEncoder: @unchecked Sendable {
     private var adaptiveBitrateScale: Double = 1.0
 
     private let queue = DispatchQueue(label: "remote.keyboard.h264.encoder")
+    private let queueSpecificKey = DispatchSpecificKey<Void>()
     private let pendingLock = NSLock()
+
+    init() {
+        queue.setSpecific(key: queueSpecificKey, value: ())
+    }
     private var queuedFrameCount = 0
     private let maxQueuedFrames = 2
 
@@ -320,6 +325,23 @@ final class H264FrameEncoder: @unchecked Sendable {
     }
 
     fileprivate func handleEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        if DispatchQueue.getSpecific(key: queueSpecificKey) != nil {
+            handleEncodedSampleBufferOnQueue(sampleBuffer)
+            return
+        }
+        var copy: CMSampleBuffer?
+        let copyStatus = CMSampleBufferCreateCopy(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleBufferOut: &copy
+        )
+        guard copyStatus == noErr, let copy else { return }
+        queue.async {
+            self.handleEncodedSampleBufferOnQueue(copy)
+        }
+    }
+
+    private func handleEncodedSampleBufferOnQueue(_ sampleBuffer: CMSampleBuffer) {
         guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
         if (didSendConfig == false || pendingConfigEmission),
