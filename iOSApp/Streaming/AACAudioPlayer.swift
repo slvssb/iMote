@@ -10,6 +10,8 @@ final class AACAudioPlayer: @unchecked Sendable {
     private let playerNode = AVAudioPlayerNode()
 
     private var outputFormat: AVAudioFormat?
+    private var aacFormat: AVAudioFormat?
+    private var aacDecoder: AVAudioConverter?
     private var isStarted = false
     private var pendingBufferCount = 0
     private var hasStartedPlayback = false
@@ -63,6 +65,8 @@ final class AACAudioPlayer: @unchecked Sendable {
         playerNode.reset()
         audioEngine.stop()
         outputFormat = nil
+        aacFormat = nil
+        aacDecoder = nil
         isStarted = false
         pendingBufferCount = 0
         hasStartedPlayback = false
@@ -83,22 +87,36 @@ final class AACAudioPlayer: @unchecked Sendable {
     }
 
     private func configureInternal(_ payload: Data) {
-        guard payload.count >= 5 else { return }
+        guard payload.count >= 12 else { return }
+        guard payload.prefix(4).elementsEqual("AAC1".utf8) else { return }
 
-        var offset = 0
+        var offset = 4
         let sampleRateRaw = payload.readUInt32(at: &offset)
-        let channelCountRaw = payload.readUInt8(at: &offset)
-
+        let channelCountRaw = Int(payload.readUInt16(at: &offset))
+        let ascLength = Int(payload.readUInt16(at: &offset))
         guard sampleRateRaw > 0,
               channelCountRaw > 0,
-              let pcmFormat = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: Double(sampleRateRaw),
-                channels: AVAudioChannelCount(channelCountRaw),
-                interleaved: false
-              ) else {
+              ascLength > 0,
+              offset + ascLength <= payload.count else {
             return
         }
+
+        guard let aacFormat = AVAudioFormat(settings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: Double(sampleRateRaw),
+            AVNumberOfChannelsKey: channelCountRaw
+        ]),
+        let pcmFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: Double(sampleRateRaw),
+            channels: AVAudioChannelCount(channelCountRaw),
+            interleaved: false
+        ),
+        let decoder = AVAudioConverter(from: aacFormat, to: pcmFormat) else {
+            return
+        }
+        self.aacFormat = aacFormat
+        self.aacDecoder = decoder
 
         if audioEngine.isRunning {
             playerNode.stop()
@@ -125,37 +143,49 @@ final class AACAudioPlayer: @unchecked Sendable {
     private func enqueueFrameInternal(_ payload: Data) {
         guard isStarted,
               let outputFormat,
-              payload.count >= 6 else {
+              let aacFormat,
+              let aacDecoder,
+              payload.count > 4 else {
             return
         }
 
         var offset = 0
-        let frameCount = Int(payload.readUInt32(at: &offset))
-        let channelCount = Int(payload.readUInt8(at: &offset))
+        let byteCount = Int(payload.readUInt32(at: &offset))
+        guard byteCount > 0, offset + byteCount <= payload.count else { return }
+        let packet = payload.subdata(in: offset..<(offset + byteCount))
 
-        guard frameCount > 0,
-              channelCount == Int(outputFormat.channelCount),
-              let pcmBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(frameCount)),
-              let channelData = pcmBuffer.floatChannelData else {
+        let compressed = AVAudioCompressedBuffer(
+            format: aacFormat,
+            packetCapacity: 1,
+            maximumPacketSize: packet.count
+        )
+        packet.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            memcpy(compressed.data, base, packet.count)
+        }
+        compressed.packetCount = 1
+        compressed.byteLength = UInt32(packet.count)
+        if let descriptions = compressed.packetDescriptions {
+            descriptions[0].mStartOffset = 0
+            descriptions[0].mVariableFramesInPacket = 0
+            descriptions[0].mDataByteSize = UInt32(packet.count)
+        }
+
+        guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: 2_048) else {
             return
         }
-
-        pcmBuffer.frameLength = AVAudioFrameCount(frameCount)
-
-        for channel in 0..<channelCount {
-            let byteCount = Int(payload.readUInt32(at: &offset))
-            guard byteCount == frameCount * MemoryLayout<Float>.size,
-                  offset + byteCount <= payload.count else {
-                return
+        nonisolated(unsafe) let feed = AACFeedOnce(buffer: compressed)
+        var error: NSError?
+        aacDecoder.convert(to: pcmBuffer, error: &error) { _, status in
+            if feed.didFeed {
+                status.pointee = .noDataNow
+                return nil
             }
-
-            payload.withUnsafeBytes { rawBuffer in
-                guard let base = rawBuffer.baseAddress else { return }
-                let src = base.advanced(by: offset)
-                memcpy(channelData[channel], src, byteCount)
-            }
-            offset += byteCount
+            feed.didFeed = true
+            status.pointee = .haveData
+            return compressed
         }
+        guard error == nil, pcmBuffer.frameLength > 0 else { return }
 
         if pendingBufferCount >= maxPendingBuffers {
             // Favor continuity: drop newest frame instead of resetting playback.
@@ -186,11 +216,27 @@ final class AACAudioPlayer: @unchecked Sendable {
     }
 }
 
+private final class AACFeedOnce: @unchecked Sendable {
+    var didFeed = false
+    let buffer: AVAudioCompressedBuffer
+
+    init(buffer: AVAudioCompressedBuffer) {
+        self.buffer = buffer
+    }
+}
+
 private extension Data {
     func readUInt8(at offset: inout Int) -> UInt8 {
         guard offset < count else { return 0 }
         let value = self[offset]
         offset += 1
+        return value
+    }
+
+    func readUInt16(at offset: inout Int) -> UInt16 {
+        guard offset + 1 < count else { return 0 }
+        let value = (UInt16(self[offset]) << 8) | UInt16(self[offset + 1])
+        offset += 2
         return value
     }
 

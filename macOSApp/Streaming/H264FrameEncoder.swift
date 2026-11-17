@@ -61,18 +61,47 @@ final class H264FrameEncoder: @unchecked Sendable {
     private var adaptiveBitrateScale: Double = 1.0
 
     private let queue = DispatchQueue(label: "remote.keyboard.h264.encoder")
+    private let pendingLock = NSLock()
+    private var queuedFrameCount = 0
+    private let maxQueuedFrames = 2
+
+    func canAcceptFrame() -> Bool {
+        pendingLock.lock()
+        defer { pendingLock.unlock() }
+        return queuedFrameCount < maxQueuedFrames
+    }
 
     func encode(cgImage: CGImage) {
+        guard reserveFrameSlot() else { return }
         queue.async {
             self.encodeInternal(cgImage)
+            self.releaseFrameSlot()
         }
     }
 
-    func encode(pixelBuffer: CVPixelBuffer) {
+    @discardableResult
+    func encode(pixelBuffer: CVPixelBuffer) -> Bool {
+        guard reserveFrameSlot() else { return false }
         let sendableBuffer = EncoderPixelBuffer(value: pixelBuffer)
         queue.async {
             self.encodeInternal(sendableBuffer.value)
+            self.releaseFrameSlot()
         }
+        return true
+    }
+
+    private func reserveFrameSlot() -> Bool {
+        pendingLock.lock()
+        defer { pendingLock.unlock() }
+        guard queuedFrameCount < maxQueuedFrames else { return false }
+        queuedFrameCount += 1
+        return true
+    }
+
+    private func releaseFrameSlot() {
+        pendingLock.lock()
+        queuedFrameCount = max(0, queuedFrameCount - 1)
+        pendingLock.unlock()
     }
 
     func stop() {

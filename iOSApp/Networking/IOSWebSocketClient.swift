@@ -46,7 +46,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     private var hostToClientControlCounter: UInt64 = 0
     private var hostToClientMediaCounter: UInt64 = 0
     private var pendingDisconnectReason: String?
-    private var localSigningPrivateKey = IOSWebSocketClient.loadOrCreateSigningPrivateKey()
+    private let localSigningPrivateKey: Curve25519.Signing.PrivateKey
     private var handshakeEphemeralPrivateKey: Curve25519.KeyAgreement.PrivateKey?
     private var pendingHostDeviceID: String?
     private var hasCompletedSecureHandshake = false
@@ -61,7 +61,16 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     }
 
     override init() {
+        let identity = SigningIdentityStore.loadOrCreate(
+            account: "ios-signing",
+            legacyDefaultsKey: "remoteKeyboard.ios.signingPrivateKey"
+        )
+        localSigningPrivateKey = identity.key
         super.init()
+        if identity.didDiscardLegacyKey {
+            UserDefaults.standard.removeObject(forKey: Self.hostSigningKeysDefaultsKey)
+            UserDefaults.standard.set(false, forKey: "remoteKeyboard.trustedSession")
+        }
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = true
         config.timeoutIntervalForRequest = 15
@@ -603,19 +612,6 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         payload.append(contentsOf: Data("|".utf8))
         payload.append(ephemeralPublicKey)
         return payload
-    }
-
-    private static func loadOrCreateSigningPrivateKey() -> Curve25519.Signing.PrivateKey {
-        let keyName = "remoteKeyboard.ios.signingPrivateKey"
-        if let stored = UserDefaults.standard.string(forKey: keyName),
-           let storedData = Data(base64Encoded: stored),
-           let existing = try? Curve25519.Signing.PrivateKey(rawRepresentation: storedData) {
-            return existing
-        }
-
-        let created = Curve25519.Signing.PrivateKey()
-        UserDefaults.standard.set(created.rawRepresentation.base64EncodedString(), forKey: keyName)
-        return created
     }
 
     private static let hostSigningKeysDefaultsKey = "remoteKeyboard.ios.trustedHostSigningKeys"

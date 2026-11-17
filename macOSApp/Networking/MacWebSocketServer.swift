@@ -34,6 +34,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         var token: String?
         var deviceName: String?
         var secureSession: SecureSession?
+        var outstandingBytes: Int = 0
     }
 
     private struct SecureSession {
@@ -75,13 +76,16 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var isThermalOverrideActive = false
     private var previewCaptureMaxWidth: CGFloat = 1920
     private var adaptiveBitrateScale: Double = 1.0
+    private var sendPressureScale: Double = 1.0
+    private var videoPressureLatched = false
+    private let videoDropOutstandingBytes = 750_000
     private var adaptiveWindowTickCount = 0
     private var adaptiveWindowSkippedCount = 0
     private var adaptiveWindowEncodedCount = 0
     private var streamStatusHeartbeatTickCount = 0
     private var audioDebugSentConfigCount = 0
     private var audioDebugSentFrameCount = 0
-    private var localSigningPrivateKey = MacWebSocketServer.loadOrCreateSigningPrivateKey()
+    private let localSigningPrivateKey: Curve25519.Signing.PrivateKey
     private let hostDeviceID = MacWebSocketServer.loadOrCreateHostDeviceID()
     private var isSystemSleeping = false
     private var isDisplaySleeping = false
@@ -107,6 +111,14 @@ final class MacWebSocketServer: @unchecked Sendable {
         self.pairingManager = pairingManager
         self.injector = injector
         self.accessibilityPermissionManager = accessibilityPermissionManager
+        let identity = SigningIdentityStore.loadOrCreate(
+            account: "host-signing",
+            legacyDefaultsKey: "remoteKeyboard.mac.signingPrivateKey"
+        )
+        self.localSigningPrivateKey = identity.key
+        if identity.didDiscardLegacyKey {
+            pairingManager.clearTrustedDevices()
+        }
 
         h264Encoder.onPacket = { [weak self] packet in
             guard let self else { return }
@@ -879,6 +891,11 @@ final class MacWebSocketServer: @unchecked Sendable {
             identifier: "remoteKeyboard",
             metadata: [metadata]
         )
+        if Self.isDroppableVideoFrame(payload), context.outstandingBytes > videoDropOutstandingBytes {
+            noteVideoSendPressure()
+            return
+        }
+
         let outboundPayload: Data
         if var session = context.secureSession, Self.isMediaPacket(payload) {
             do {
@@ -904,12 +921,74 @@ final class MacWebSocketServer: @unchecked Sendable {
             outboundPayload = payload
         }
 
+        let byteCount = outboundPayload.count
+        if var current = clients[id] {
+            current.outstandingBytes += byteCount
+            clients[id] = current
+        }
         context.connection.send(
             content: outboundPayload,
             contentContext: contentContext,
             isComplete: true,
-            completion: .idempotent
+            completion: .contentProcessed { [weak self] _ in
+                self?.queue.async {
+                    guard var current = self?.clients[id] else { return }
+                    current.outstandingBytes = max(0, current.outstandingBytes - byteCount)
+                    self?.clients[id] = current
+                    self?.refreshBitrateFromSendPressure()
+                }
+            }
         )
+    }
+
+    private func noteVideoSendPressure() {
+        videoPressureLatched = true
+        refreshBitrateFromSendPressure()
+    }
+
+    private func refreshBitrateFromSendPressure() {
+        let pending = clients.values.map(\.outstandingBytes).max() ?? 0
+        if pending > videoDropOutstandingBytes {
+            videoPressureLatched = true
+        } else if videoPressureLatched, pending < 200_000 {
+            videoPressureLatched = false
+            h264Encoder.requestStreamResync()
+        }
+
+        var next = sendPressureScale
+        if pending > 2_000_000 {
+            next -= 0.12
+        } else if pending > videoDropOutstandingBytes {
+            next -= 0.06
+        } else if pending < 180_000 {
+            next += 0.04
+        }
+        next = min(max(next, 0.35), 1.0)
+        guard abs(next - sendPressureScale) > 0.02 else { return }
+        sendPressureScale = next
+        h264Encoder.setAdaptiveBitrateScale(min(adaptiveBitrateScale, sendPressureScale))
+    }
+
+    private static func isDroppableVideoFrame(_ payload: Data) -> Bool {
+        guard payload.first == BinaryPacketMarker.h264Frame, payload.count > 5 else { return false }
+        var offset = 1
+        var sawKeyframe = false
+        while offset + 4 < payload.count {
+            let length = (Int(payload[offset]) << 24)
+                | (Int(payload[offset + 1]) << 16)
+                | (Int(payload[offset + 2]) << 8)
+                | Int(payload[offset + 3])
+            let nalIndex = offset + 4
+            guard length > 0, nalIndex < payload.count else { return false }
+            let nalType = payload[nalIndex] & 0x1F
+            if nalType == 5 {
+                sawKeyframe = true
+            }
+            let next = nalIndex + length
+            guard next > offset else { return false }
+            offset = next
+        }
+        return sawKeyframe == false
     }
 
     private static func isMediaPacket(_ payload: Data) -> Bool {
@@ -945,17 +1024,6 @@ final class MacWebSocketServer: @unchecked Sendable {
         return created
     }
 
-    private static func loadOrCreateSigningPrivateKey() -> Curve25519.Signing.PrivateKey {
-        let key = "remoteKeyboard.mac.signingPrivateKey"
-        if let stored = UserDefaults.standard.string(forKey: key),
-           let data = Data(base64Encoded: stored),
-           let existing = try? Curve25519.Signing.PrivateKey(rawRepresentation: data) {
-            return existing
-        }
-        let created = Curve25519.Signing.PrivateKey()
-        UserDefaults.standard.set(created.rawRepresentation.base64EncodedString(), forKey: key)
-        return created
-    }
 
     private func publishClients() {
         let snapshot = clients.values.map { context in
@@ -1009,6 +1077,12 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard pairedClientIDs.isEmpty == false else { return }
+        guard h264Encoder.canAcceptFrame() else {
+            adaptiveWindowTickCount += 1
+            adaptiveWindowSkippedCount += 1
+            updateAdaptiveBitrateIfNeeded()
+            return
+        }
         adaptiveWindowTickCount += 1
         guard isFrameCaptureInFlight == false else {
             adaptiveWindowSkippedCount += 1
@@ -1053,8 +1127,11 @@ final class MacWebSocketServer: @unchecked Sendable {
 
                 self.consecutiveFrameFailures = 0
                 self.publishCaptureActivityIfNeeded()
-                self.h264Encoder.encode(pixelBuffer: framePixelBuffer.value)
-                self.adaptiveWindowEncodedCount += 1
+                if self.h264Encoder.encode(pixelBuffer: framePixelBuffer.value) {
+                    self.adaptiveWindowEncodedCount += 1
+                } else {
+                    self.adaptiveWindowSkippedCount += 1
+                }
                 self.updateAdaptiveBitrateIfNeeded()
             }
         }
@@ -1171,7 +1248,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         nextScale = min(max(nextScale, 0.45), 1.0)
         if abs(nextScale - adaptiveBitrateScale) > 0.01 {
             adaptiveBitrateScale = nextScale
-            h264Encoder.setAdaptiveBitrateScale(adaptiveBitrateScale)
+            h264Encoder.setAdaptiveBitrateScale(min(adaptiveBitrateScale, sendPressureScale))
         }
 
         adaptiveWindowTickCount = 0
