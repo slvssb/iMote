@@ -113,16 +113,18 @@ final class IOSKeyboardViewModel: ObservableObject {
     private var permissionPollTask: Task<Void, Never>?
     private var hasSeenMissingRequiredPermissions = false
 
-    private let trustedSessionKey = "remoteKeyboard.trustedSession"
     private let connectionModeKey = "remoteKeyboard.connectionTargetMode"
     private let manualHostKey = "remoteKeyboard.manualHost"
     private let manualPortKey = "remoteKeyboard.manualPort"
+    private var activeEndpoint: (host: String, port: Int)?
     private var hasTrustedSession: Bool {
-        get { UserDefaults.standard.bool(forKey: trustedSessionKey) }
-        set { UserDefaults.standard.set(newValue, forKey: trustedSessionKey) }
+        guard let endpoint = currentConnectionEndpoint() else { return false }
+        let stored = TrustedHostSessionStore.load()[TrustedHostSessionStore.endpointKey(host: endpoint.host, port: endpoint.port)]
+        return stored?.isEmpty == false
     }
 
     init() {
+        UserDefaults.standard.removeObject(forKey: TrustedHostSessionStore.legacyFlagKey)
         let defaults = UserDefaults.standard
         if let rawMode = defaults.string(forKey: connectionModeKey),
            let mode = ConnectionTargetMode(rawValue: rawMode) {
@@ -186,7 +188,6 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.isUserInitiatedDisconnecting = false
                     self.suppressExpectedDisconnectErrors = false
                     self.connectionLabel = "Paired and ready (E2E)"
-                    self.hasTrustedSession = true
                     self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
                     self.client.sendAudioConfig(source: self.audioCaptureSource)
                     self.client.sendStreamResync()
@@ -207,12 +208,6 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.screenPreview.reset()
                     self.aacAudioPlayer.stop()
                     self.resetPermissionGate()
-                    if self.hasTrustedSession,
-                       self.pairingCode.isEmpty,
-                       reason.localizedCaseInsensitiveContains("invalid pairing code") {
-                        self.hasTrustedSession = false
-                        self.client.disconnect(userInitiated: true)
-                    }
                 }
             }
             .store(in: &cancellables)
@@ -284,10 +279,11 @@ final class IOSKeyboardViewModel: ObservableObject {
             )
         }
 
-        client.onHostFingerprintPinned = { [weak self] fingerprint, isNew in
+        client.onHostFingerprintPinned = { [weak self] fingerprint, signingKey, isNew in
             guard let self else { return }
             self.pairedHostFingerprint = fingerprint
             self.pairedHostFingerprintIsNew = isNew
+            self.rememberTrustedHost(signingPublicKey: signingKey)
         }
 
         client.onPermissionStatus = { [weak self] accessibilityGranted, screenRecordingGranted in
@@ -366,6 +362,7 @@ final class IOSKeyboardViewModel: ObservableObject {
 
         lastError = nil
         noteConnectionDraftChanged()
+        activeEndpoint = (host, port)
         client.connect(host: host, port: port, pairingCode: codeToUse)
     }
 
@@ -526,9 +523,17 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     func forgetTrustedSessionOnPhone() {
-        hasTrustedSession = false
+        let endpoint = activeEndpoint ?? currentConnectionEndpoint()
+        var map = TrustedHostSessionStore.load()
+        var removedKey: String?
+        if let endpoint {
+            removedKey = map.removeValue(forKey: TrustedHostSessionStore.endpointKey(host: endpoint.host, port: endpoint.port))
+            TrustedHostSessionStore.save(map)
+        }
+        if let removedKey, map.values.contains(removedKey) == false {
+            client.removeTrustedHostPin(signingPublicKey: removedKey)
+        }
         pairingCode = ""
-        client.clearTrustedHostPins()
         pairedHostFingerprint = nil
         pairedHostFingerprintIsNew = false
     }
@@ -608,6 +613,26 @@ final class IOSKeyboardViewModel: ObservableObject {
         permissionPollTask = nil
     }
 
+    private func currentConnectionEndpoint() -> (host: String, port: Int)? {
+        switch connectionTargetMode {
+        case .localDiscovery:
+            guard let selectedService else { return nil }
+            return (selectedService.host, selectedService.port)
+        case .manualAddress:
+            guard case let .success(address) = RemoteHostAddress.parse(hostField: manualHost, portField: manualPortText) else {
+                return nil
+            }
+            return (address.host, address.port)
+        }
+    }
+
+    private func rememberTrustedHost(signingPublicKey: String) {
+        guard signingPublicKey.isEmpty == false, let endpoint = activeEndpoint else { return }
+        var map = TrustedHostSessionStore.load()
+        map[TrustedHostSessionStore.endpointKey(host: endpoint.host, port: endpoint.port)] = signingPublicKey
+        TrustedHostSessionStore.save(map)
+    }
+
     private func shouldSendAsUnicodeText(_ character: Character) -> Bool {
         guard let scalar = character.unicodeScalars.first, character.unicodeScalars.count == 1 else {
             return true
@@ -615,5 +640,29 @@ final class IOSKeyboardViewModel: ObservableObject {
         if CharacterSet.lowercaseLetters.contains(scalar) { return true }
         if scalar.value < 0x20 || scalar.value > 0x7E { return true }
         return false
+    }
+}
+
+private enum TrustedHostSessionStore {
+    static let storageKey = "remoteKeyboard.trustedHostsByEndpoint"
+    static let legacyFlagKey = "remoteKeyboard.trustedSession"
+
+    static func load() -> [String: String] {
+        guard let stored = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] else {
+            return [:]
+        }
+        return stored
+    }
+
+    static func save(_ map: [String: String]) {
+        if map.isEmpty {
+            UserDefaults.standard.removeObject(forKey: storageKey)
+        } else {
+            UserDefaults.standard.set(map, forKey: storageKey)
+        }
+    }
+
+    static func endpointKey(host: String, port: Int) -> String {
+        "\(host.lowercased())|\(port)"
     }
 }

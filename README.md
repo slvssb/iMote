@@ -31,7 +31,7 @@ Current mitigations:
 
 - 6-digit pairing code. A successful guess burns it. Failed guesses wait, and five failures rotate it.
 - At most eight connections that have not paired may be open at once, and a WebSocket frame larger than 1 MB is rejected.
-- A trusted phone can reconnect without a code only when its signing key is already pinned. The id is added to that set only after the handshake signature verifies.
+- A trusted phone can reconnect without a code only when its signing key is already pinned. The id is added to that set only after the handshake signature verifies. The phone stores that reconnect trust per host signing key. Forget is the only thing that clears it. An error from another address does not.
 - Curve25519 handshake with signed ephemeral keys. The signature is checked before either side writes a pin. A bad hello does not stick.
 - Clear, Remove, and Forget delete the pin as well as the trusted id. The Mac window, menu bar, and iPhone show a fingerprint on first pair.
 - ChaChaPoly with a direction and a counter in the associated data, so a captured control or media box cannot be replayed. The outer `secureControl` frame does not carry the session token.

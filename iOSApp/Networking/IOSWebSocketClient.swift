@@ -26,7 +26,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onThermalOverrideChanged: ((Bool) -> Void)?
     var onHostCaptureStatusChanged: ((String?, Int?, Bool?) -> Void)?
     var onPermissionStatus: ((Bool, Bool) -> Void)?
-    var onHostFingerprintPinned: ((String, Bool) -> Void)?
+    var onHostFingerprintPinned: ((String, String, Bool) -> Void)?
 
     private var session: URLSession!
     private var task: URLSessionWebSocketTask?
@@ -73,7 +73,8 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         super.init()
         if identity.didDiscardLegacyKey {
             UserDefaults.standard.removeObject(forKey: Self.hostSigningKeysDefaultsKey)
-            UserDefaults.standard.set(false, forKey: "remoteKeyboard.trustedSession")
+            UserDefaults.standard.removeObject(forKey: "remoteKeyboard.trustedSession")
+            UserDefaults.standard.removeObject(forKey: "remoteKeyboard.trustedHostsByEndpoint")
         }
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = true
@@ -617,7 +618,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             state = .paired
             startPing()
             let fingerprint = IdentityFingerprint.displayString(forPublicKey: hostSigningPublicKeyData)
-            onHostFingerprintPinned?(fingerprint, pin == .pinnedNew)
+            onHostFingerprintPinned?(fingerprint, hostSigningPublicKeyBase64, pin == .pinnedNew)
         } catch {
             if pin == .pinnedNew {
                 rollbackHostPin(hostDeviceID: hostDeviceID)
@@ -626,8 +627,15 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         }
     }
 
-    func clearTrustedHostPins() {
-        UserDefaults.standard.removeObject(forKey: Self.hostSigningKeysDefaultsKey)
+    func removeTrustedHostPin(signingPublicKey: String) {
+        guard signingPublicKey.isEmpty == false else { return }
+        var map = UserDefaults.standard.dictionary(forKey: Self.hostSigningKeysDefaultsKey) as? [String: String] ?? [:]
+        let remaining = map.filter { $0.value != signingPublicKey }
+        if remaining.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.hostSigningKeysDefaultsKey)
+        } else if remaining.count != map.count {
+            UserDefaults.standard.set(remaining, forKey: Self.hostSigningKeysDefaultsKey)
+        }
     }
 
     var localSigningFingerprint: String {
