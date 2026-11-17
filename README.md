@@ -51,7 +51,7 @@ Not a hardened remote administration solution yet:
 - Remote keyboard input (text, modifiers, special keys)
 - Remote trackpad input (move/click/scroll)
 - Live screen preview from macOS host to iPhone
-- Host audio streaming to iPhone (`System`, `Mic`, or `Both`)
+- Host audio streaming to iPhone (`System`, `Mic`, or `Both`). Both mixes system audio and the microphone into one stream.
 - Trusted-device pairing with optional trust reset from iPhone or Mac
 - Start on Login support for the macOS host
 - Saved remote hosts on iPhone for Tailscale MagicDNS names or `100.x` addresses
@@ -200,6 +200,6 @@ Try these after pairing:
 - Tap `↩`: sends return.
 - Enable `⌘` modifier + type `c`: sends `Cmd+C` for the Mac's current layout, including a non-US layout.
 - Tap arrow buttons: moves cursor.
-- Change iPhone audio source to `System`, `Mic`, or `Both`: host audio should follow the selected mode, and the orange mic indicator should go away after the phone disconnects.
+- Change iPhone audio source to `System`, `Mic`, or `Both`: host audio should follow the selected mode. Both should play system audio and the microphone together, not alternating. The orange mic indicator should go away after the phone disconnects.
 - Compare the fingerprint on the iPhone with This Mac in the host window the first time you pair.
 - Forget trusted Mac on the iPhone, or Clear trusted devices on the Mac. The next connection needs a new code, and a bad pin does not survive the forget.

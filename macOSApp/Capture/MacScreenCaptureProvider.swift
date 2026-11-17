@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import CoreGraphics
 import CoreMedia
 import CoreVideo
@@ -28,6 +29,7 @@ actor MacScreenCaptureProvider {
     private var latestPixelBuffer: CapturedPixelBuffer?
     private var activeMaxWidth: CGFloat = 0
     private var audioCaptureSource: AudioCaptureSource = .off
+    private let audioMixer = SystemAndMicMixer()
     private var audioSampleHandler: ((CapturedAudioSampleBuffer) -> Void)?
     private var activeCaptureRouteLabel: String = "Unknown"
     private var preferFallbackDisplay = false
@@ -83,6 +85,7 @@ actor MacScreenCaptureProvider {
         self.activeCaptureRouteLabel = "Unknown"
         self.latestPixelBuffer = nil
         self.activeMaxWidth = 0
+        audioMixer.reset()
     }
 
     func recoverAfterSystemWake(maxWidth: CGFloat = 1920) async -> Bool {
@@ -108,6 +111,7 @@ actor MacScreenCaptureProvider {
     func setAudioCaptureSource(_ source: AudioCaptureSource) async {
         guard audioCaptureSource != source else { return }
         audioCaptureSource = source
+        audioMixer.reset()
         if let filter = contentFilter {
             try? await rebuildCaptureStream(filter: filter, maxWidth: activeMaxWidth > 0 ? activeMaxWidth : 1920)
         }
@@ -224,8 +228,18 @@ actor MacScreenCaptureProvider {
         latestPixelBuffer = pixelBuffer
     }
 
-    fileprivate func consumeAudioSampleBuffer(_ sampleBuffer: CapturedAudioSampleBuffer) {
-        audioSampleHandler?(sampleBuffer)
+    fileprivate func consumeAudioSampleBuffer(
+        _ sampleBuffer: CapturedAudioSampleBuffer,
+        from outputType: SCStreamOutputType
+    ) {
+        guard audioCaptureSource == .systemAndMicrophone else {
+            audioSampleHandler?(sampleBuffer)
+            return
+        }
+        let mixed = audioMixer.push(sampleBuffer.value, isMicrophone: outputType == .microphone)
+        for buffer in mixed {
+            audioSampleHandler?(CapturedAudioSampleBuffer(value: buffer))
+        }
     }
 
     private func selectCaptureDisplay(from displays: [SCDisplay]) -> SCDisplay? {
@@ -294,11 +308,251 @@ private final class StreamOutput: NSObject, SCStreamOutput {
             }
         case .audio, .microphone:
             let audioSample = CapturedAudioSampleBuffer(value: sampleBuffer)
+            let outputType = outputType
             Task {
-                await owner.consumeAudioSampleBuffer(audioSample)
+                await owner.consumeAudioSampleBuffer(audioSample, from: outputType)
             }
         @unknown default:
             return
         }
+    }
+}
+
+/// ScreenCaptureKit delivers system audio and the microphone as separate buffers.
+/// Both mode used to encode each buffer on its own, so the phone heard them alternating.
+/// This mixes matching frames into one PCM buffer before the AAC encoder packetizes it.
+private final class SystemAndMicMixer {
+    private let targetFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: 48_000,
+        channels: 2,
+        interleaved: true
+    )
+    private var systemConverter: AVAudioConverter?
+    private var systemFormatKey: String?
+    private var microphoneConverter: AVAudioConverter?
+    private var microphoneFormatKey: String?
+    private var systemSamples: [Float] = []
+    private var microphoneSamples: [Float] = []
+    private var sawSystem = false
+    private var sawMicrophone = false
+
+    func reset() {
+        systemConverter = nil
+        systemFormatKey = nil
+        microphoneConverter = nil
+        microphoneFormatKey = nil
+        systemSamples.removeAll()
+        microphoneSamples.removeAll()
+        sawSystem = false
+        sawMicrophone = false
+    }
+
+    func push(_ sampleBuffer: CMSampleBuffer, isMicrophone: Bool) -> [CMSampleBuffer] {
+        guard let targetFormat,
+              let converted = convert(sampleBuffer, isMicrophone: isMicrophone, targetFormat: targetFormat) else {
+            return []
+        }
+        if isMicrophone {
+            microphoneSamples.append(contentsOf: converted)
+            sawMicrophone = true
+        } else {
+            systemSamples.append(contentsOf: converted)
+            sawSystem = true
+        }
+        trimLead()
+        return drain(format: targetFormat)
+    }
+
+    private func drain(format: AVAudioFormat) -> [CMSampleBuffer] {
+        let systemFrames = systemSamples.count / 2
+        let microphoneFrames = microphoneSamples.count / 2
+
+        if sawSystem && sawMicrophone {
+            let frames = min(systemFrames, microphoneFrames)
+            guard frames > 0 else { return [] }
+            var mixed = [Float](repeating: 0, count: frames * 2)
+            for index in 0..<(frames * 2) {
+                let sum = systemSamples[index] + microphoneSamples[index]
+                mixed[index] = min(1, max(-1, sum))
+            }
+            systemSamples.removeFirst(frames * 2)
+            microphoneSamples.removeFirst(frames * 2)
+            guard let buffer = makeSampleBuffer(samples: mixed, format: format) else { return [] }
+            return [buffer]
+        }
+
+        // Hold a lone stream briefly so the other side can arrive, then pass it through.
+        let soloHoldFrames = 48_000 / 10
+        if sawMicrophone == false, systemFrames >= soloHoldFrames {
+            return emitSolo(&systemSamples, frames: systemFrames, format: format)
+        }
+        if sawSystem == false, microphoneFrames >= soloHoldFrames {
+            return emitSolo(&microphoneSamples, frames: microphoneFrames, format: format)
+        }
+        return []
+    }
+
+    private func emitSolo(_ samples: inout [Float], frames: Int, format: AVAudioFormat) -> [CMSampleBuffer] {
+        let count = frames * 2
+        let chunk = Array(samples.prefix(count))
+        samples.removeFirst(count)
+        guard let buffer = makeSampleBuffer(samples: chunk, format: format) else { return [] }
+        return [buffer]
+    }
+
+    private func trimLead() {
+        let maxSamples = 48_000 * 2 * 2
+        if systemSamples.count > maxSamples {
+            systemSamples.removeFirst(systemSamples.count - maxSamples)
+        }
+        if microphoneSamples.count > maxSamples {
+            microphoneSamples.removeFirst(microphoneSamples.count - maxSamples)
+        }
+    }
+
+    private func convert(
+        _ sampleBuffer: CMSampleBuffer,
+        isMicrophone: Bool,
+        targetFormat: AVAudioFormat
+    ) -> [Float]? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription),
+              let sourceFormat = AVAudioFormat(streamDescription: asbdPointer) else {
+            return nil
+        }
+        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard frameCount > 0,
+              let sourceBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: AVAudioFrameCount(frameCount)) else {
+            return nil
+        }
+        sourceBuffer.frameLength = AVAudioFrameCount(frameCount)
+        let copyStatus = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: sourceBuffer.mutableAudioBufferList
+        )
+        guard copyStatus == noErr else { return nil }
+
+        let key = "\(sourceFormat.sampleRate)-\(sourceFormat.channelCount)-\(sourceFormat.commonFormat.rawValue)"
+        let converter: AVAudioConverter
+        if isMicrophone {
+            if microphoneConverter == nil || microphoneFormatKey != key {
+                guard let created = AVAudioConverter(from: sourceFormat, to: targetFormat) else { return nil }
+                microphoneConverter = created
+                microphoneFormatKey = key
+            }
+            guard let microphoneConverter else { return nil }
+            converter = microphoneConverter
+        } else {
+            if systemConverter == nil || systemFormatKey != key {
+                guard let created = AVAudioConverter(from: sourceFormat, to: targetFormat) else { return nil }
+                systemConverter = created
+                systemFormatKey = key
+            }
+            guard let systemConverter else { return nil }
+            converter = systemConverter
+        }
+
+        let ratio = targetFormat.sampleRate / sourceFormat.sampleRate
+        let capacity = AVAudioFrameCount(Double(sourceBuffer.frameLength) * ratio) + 32
+        guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: max(capacity, 1)) else {
+            return nil
+        }
+        var convertError: NSError?
+        nonisolated(unsafe) let feed = MixerFeed(buffer: sourceBuffer)
+        converter.convert(to: output, error: &convertError) { _, status in
+            if feed.didFeed {
+                status.pointee = .noDataNow
+                return nil
+            }
+            feed.didFeed = true
+            status.pointee = .haveData
+            return sourceBuffer
+        }
+        guard convertError == nil, output.frameLength > 0 else { return nil }
+        let frames = Int(output.frameLength)
+        let channels = Int(output.format.channelCount)
+        let sampleCount = frames * channels
+        let audioBuffer = output.audioBufferList.pointee.mBuffers
+        guard let data = audioBuffer.mData else { return nil }
+        let pointer = data.assumingMemoryBound(to: Float.self)
+        return Array(UnsafeBufferPointer(start: pointer, count: sampleCount))
+    }
+
+    private func makeSampleBuffer(samples: [Float], format: AVAudioFormat) -> CMSampleBuffer? {
+        guard samples.count >= 2, samples.count.isMultiple(of: 2) else { return nil }
+        var asbd = format.streamDescription.pointee
+        var formatDescription: CMAudioFormatDescription?
+        let formatStatus = CMAudioFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            asbd: &asbd,
+            layoutSize: 0,
+            layout: nil,
+            magicCookieSize: 0,
+            magicCookie: nil,
+            extensions: nil,
+            formatDescriptionOut: &formatDescription
+        )
+        guard formatStatus == noErr, let formatDescription else { return nil }
+
+        let byteCount = samples.count * MemoryLayout<Float>.size
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: byteCount,
+            blockAllocator: nil,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: byteCount,
+            flags: 0,
+            blockBufferOut: &block
+        ) == kCMBlockBufferNoErr, let block else {
+            return nil
+        }
+        let copied = samples.withUnsafeBytes { raw in
+            CMBlockBufferReplaceDataBytes(
+                with: raw.baseAddress!,
+                blockBuffer: block,
+                offsetIntoDestination: 0,
+                dataLength: byteCount
+            )
+        }
+        guard copied == kCMBlockBufferNoErr else { return nil }
+
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: 48_000),
+            presentationTimeStamp: .invalid,
+            decodeTimeStamp: .invalid
+        )
+        var sampleSize = Int(asbd.mBytesPerFrame)
+        var sample: CMSampleBuffer?
+        let status = CMSampleBufferCreate(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: block,
+            dataReady: true,
+            makeDataReadyCallback: nil,
+            refcon: nil,
+            formatDescription: formatDescription,
+            sampleCount: samples.count / 2,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleSizeEntryCount: 1,
+            sampleSizeArray: &sampleSize,
+            sampleBufferOut: &sample
+        )
+        guard status == noErr else { return nil }
+        return sample
+    }
+}
+
+private final class MixerFeed: @unchecked Sendable {
+    var didFeed = false
+    let buffer: AVAudioPCMBuffer
+
+    init(buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
     }
 }
