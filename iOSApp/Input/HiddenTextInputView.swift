@@ -282,7 +282,6 @@ final class BackspaceTextView: UITextView {
     var backspaceWhenEmptyHandler: (() -> Void)?
     weak var keyboardToolbar: KeyboardAccessoryView?
     var lockFocus = false
-    private var clearWorkItem: DispatchWorkItem?
 
     override func deleteBackward() {
         if (text ?? "").isEmpty {
@@ -343,17 +342,7 @@ final class BackspaceTextView: UITextView {
     func clearPreview() {
         text = ""
         moveCursorToEnd()
-        clearWorkItem?.cancel()
         keyboardToolbar?.updateLiveInput("")
-    }
-
-    func scheduleAutoClear() {
-        clearWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.clearPreview()
-        }
-        clearWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: workItem)
     }
 
     func prewarmKeyboardIfNeeded() {
