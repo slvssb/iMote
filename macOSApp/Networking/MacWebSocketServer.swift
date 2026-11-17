@@ -354,6 +354,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func disconnect(id: UUID) {
+        injector.releasePressedMouseButtons(for: id)
         if let removed = clients.removeValue(forKey: id) {
             pairingManager.revoke(token: removed.token)
         }
@@ -703,7 +704,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         let modifiers = message.modifiers ?? []
 
         do {
-            try injector.injectMouseClick(button: button, modifiers: modifiers, action: action)
+            try injector.injectMouseClick(button: button, modifiers: modifiers, action: action, clientID: id)
         } catch {
             send(.error(error.localizedDescription), to: id)
         }

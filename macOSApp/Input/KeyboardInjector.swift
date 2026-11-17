@@ -28,7 +28,7 @@ final class KeyboardInjector {
     private var lastMouseTapLocation: CGPoint = .zero
     private var lastMouseTapButton: MouseButton?
     private var lastMouseTapClickCount: Int64 = 0
-    private var pressedMouseButtons: Set<MouseButton> = []
+    private var pressedMouseButtons: [MouseButton: UUID] = [:]
     private var controlArrowSource: CGEventSource?
 
     init(permissionManager: AccessibilityPermissionManager) {
@@ -107,7 +107,7 @@ final class KeyboardInjector {
         moveEvent.post(tap: .cghidEventTap)
     }
 
-    func injectMouseClick(button: MouseButton, modifiers: [RemoteModifier] = [], action: KeyAction) throws {
+    func injectMouseClick(button: MouseButton, modifiers: [RemoteModifier] = [], action: KeyAction, clientID: UUID) throws {
         if permissionManager.isTrusted() == false {
             throw KeyboardInjectorError.accessibilityPermissionMissing
         }
@@ -139,7 +139,7 @@ final class KeyboardInjector {
 
         switch action {
         case .down:
-            pressedMouseButtons.insert(button)
+            pressedMouseButtons[button] = clientID
             try postMouseEvent(
                 source: eventSource,
                 type: downType,
@@ -149,7 +149,7 @@ final class KeyboardInjector {
                 flags: mapper.eventFlags(for: modifiers)
             )
         case .up:
-            pressedMouseButtons.remove(button)
+            pressedMouseButtons.removeValue(forKey: button)
             try postMouseEvent(
                 source: eventSource,
                 type: upType,
@@ -176,6 +176,33 @@ final class KeyboardInjector {
                 button: mappedButton,
                 clickState: clickState,
                 flags: flags
+            )
+        }
+    }
+
+    /// Posts a button-up for every button this client left down. A dropped up, or a phone that sleeps mid-drag, would otherwise leave the Mac dragging.
+    func releasePressedMouseButtons(for clientID: UUID) {
+        let held = pressedMouseButtons.compactMap { button, owner in
+            owner == clientID ? button : nil
+        }
+        guard held.isEmpty == false else { return }
+        for button in held {
+            pressedMouseButtons.removeValue(forKey: button)
+        }
+        guard permissionManager.isTrusted(),
+              let eventSource = CGEventSource(stateID: .combinedSessionState),
+              let currentEvent = CGEvent(source: eventSource) else {
+            return
+        }
+        let point = currentEvent.location
+        for button in held {
+            guard let mapped = mouseEventTypes(for: button) else { continue }
+            try? postMouseEvent(
+                source: eventSource,
+                type: mapped.up,
+                point: point,
+                button: mapped.button,
+                clickState: 1
             )
         }
     }
@@ -380,29 +407,40 @@ final class KeyboardInjector {
     }
 
     private func mouseMoveEventTypeForPressedButtons() -> CGEventType {
-        if pressedMouseButtons.contains(.left) {
+        if pressedMouseButtons[.left] != nil {
             return .leftMouseDragged
         }
-        if pressedMouseButtons.contains(.right) {
+        if pressedMouseButtons[.right] != nil {
             return .rightMouseDragged
         }
-        if pressedMouseButtons.contains(.center) {
+        if pressedMouseButtons[.center] != nil {
             return .otherMouseDragged
         }
         return .mouseMoved
     }
 
     private func mouseButtonForPressedButtons() -> CGMouseButton {
-        if pressedMouseButtons.contains(.left) {
+        if pressedMouseButtons[.left] != nil {
             return .left
         }
-        if pressedMouseButtons.contains(.right) {
+        if pressedMouseButtons[.right] != nil {
             return .right
         }
-        if pressedMouseButtons.contains(.center) {
+        if pressedMouseButtons[.center] != nil {
             return .center
         }
         return .left
+    }
+
+    private func mouseEventTypes(for button: MouseButton) -> (button: CGMouseButton, down: CGEventType, up: CGEventType)? {
+        switch button {
+        case .left:
+            return (.left, .leftMouseDown, .leftMouseUp)
+        case .right:
+            return (.right, .rightMouseDown, .rightMouseUp)
+        case .center:
+            return (.center, .otherMouseDown, .otherMouseUp)
+        }
     }
 
     private func normalizedScrollDelta(_ value: Double) -> Int32 {
