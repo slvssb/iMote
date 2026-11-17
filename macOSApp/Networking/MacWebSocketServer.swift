@@ -75,6 +75,8 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var requestedPreviewZoomLevel: Double = 1.0
     private var appliedPreviewZoomLevel: Double = -1
     private var selectedAudioCaptureSource: AudioCaptureSource = .off
+    private var previewConfigOwnerID: UUID?
+    private var audioConfigOwnerID: UUID?
     private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     private var isThermalOverrideActive = false
     private var previewCaptureMaxWidth: CGFloat = 1920
@@ -340,6 +342,8 @@ final class MacWebSocketServer: @unchecked Sendable {
             context.connection.cancel()
         }
         clients.removeAll()
+        previewConfigOwnerID = nil
+        audioConfigOwnerID = nil
         listener?.cancel()
         listener = nil
         stopFrameBroadcasting()
@@ -384,6 +388,12 @@ final class MacWebSocketServer: @unchecked Sendable {
     private func disconnect(id: UUID) {
         if let removed = clients.removeValue(forKey: id) {
             pairingManager.revoke(token: removed.token)
+        }
+        if previewConfigOwnerID == id {
+            previewConfigOwnerID = nil
+        }
+        if audioConfigOwnerID == id {
+            audioConfigOwnerID = nil
         }
         injector.releasePressedButtons()
         publishClients()
@@ -766,10 +776,14 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard let mode = message.qualityMode else { return }
-        userSelectedQualityMode = mode
-        if let zoomLevel = message.previewZoomLevel {
-            requestedPreviewZoomLevel = min(max(zoomLevel, 1.0), 3.0)
+        let zoom = min(max(message.previewZoomLevel ?? requestedPreviewZoomLevel, 1.0), 3.0)
+        if rejectsConflictingPreviewConfig(mode: mode, zoom: zoom, from: id) {
+            send(.error("Another phone is already controlling preview quality."), to: id)
+            return
         }
+        previewConfigOwnerID = id
+        userSelectedQualityMode = mode
+        requestedPreviewZoomLevel = zoom
         applyEffectiveQualityMode()
         publishMediaStatus()
     }
@@ -793,6 +807,14 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard let source = message.audioSource else { return }
+        if let owner = audioConfigOwnerID,
+           owner != id,
+           clients[owner]?.token != nil,
+           source != selectedAudioCaptureSource {
+            send(.error("Another phone is already controlling audio."), to: id)
+            return
+        }
+        audioConfigOwnerID = id
         selectedAudioCaptureSource = source
         Task {
             await screenCaptureProvider.setAudioCaptureSource(source)
@@ -842,12 +864,30 @@ final class MacWebSocketServer: @unchecked Sendable {
         guard let action = message.trustAction else { return }
         switch action {
         case .forgetCurrentDevice:
-            guard let deviceID = message.deviceID, deviceID.isEmpty == false else {
-                send(.error("Missing device identifier for trust action"), to: id)
+            guard let authenticatedID = clients[id]?.secureSession?.clientDeviceID,
+                  authenticatedID.isEmpty == false else {
+                send(.error("Secure session required to forget this phone."), to: id)
                 return
             }
-            pairingManager.removeTrustedDevice(deviceID: deviceID)
+            let requested = message.deviceID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if requested.isEmpty == false, requested != authenticatedID {
+                send(.error("A paired phone can only forget itself."), to: id)
+                return
+            }
+            pairingManager.removeTrustedDevice(deviceID: authenticatedID)
         }
+    }
+
+    private func rejectsConflictingPreviewConfig(mode: PreviewQualityMode, zoom: Double, from id: UUID) -> Bool {
+        guard let owner = previewConfigOwnerID,
+              owner != id,
+              clients[owner]?.token != nil else {
+            return false
+        }
+        if mode != userSelectedQualityMode {
+            return true
+        }
+        return abs(zoom - requestedPreviewZoomLevel) > 0.01
     }
 
     private func authorize(id: UUID, token: String?) -> Bool {
