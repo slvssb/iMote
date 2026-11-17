@@ -298,11 +298,11 @@ private final class FeedOnce: @unchecked Sendable {
 private extension Data {
     mutating func appendUInt16BE(_ value: UInt16) {
         var big = value.bigEndian
-        append(contentsOf: withUnsafeBytes(of: &big, Array.init))
+        append(contentsOf: Swift.withUnsafeBytes(of: &big, Array.init))
     }
 
     mutating func appendUInt32BE(_ value: UInt32) {
         var big = value.bigEndian
-        append(contentsOf: withUnsafeBytes(of: &big, Array.init))
+        append(contentsOf: Swift.withUnsafeBytes(of: &big, Array.init))
     }
 }
