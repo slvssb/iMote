@@ -10,27 +10,28 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
     private let captureSession = AVCaptureSession()
     private let captureQueue = DispatchQueue(label: "imote.eye.capture", qos: .userInitiated)
     private let analysisQueue = DispatchQueue(label: "imote.eye.analysis", qos: .userInitiated)
+    private let stateQueue = DispatchQueue(label: "imote.eye.state")
     private let videoOutput = AVCaptureVideoDataOutput()
 
     private var isConfigured = false
     private var isAnalyzingFrame = false
     private var frameCounter = 0
+    private var nextGeneration: UInt64 = 0
+    private var activeGeneration: UInt64 = 0
     private var baselinePoint: CGPoint?
     private var smoothedOffset = CGPoint.zero
     private var lastMoveDispatchTime: CFTimeInterval = 0
 
     func start() {
-        guard isRunning == false else { return }
-
         let authStatus = AVCaptureDevice.authorizationStatus(for: .video)
 
         switch authStatus {
         case .authorized:
-            startCaptureSession()
+            beginStart()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 guard granted else { return }
-                self?.startCaptureSession()
+                self?.beginStart()
             }
         case .denied, .restricted:
             break
@@ -40,27 +41,50 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
     }
 
     func stop() {
-        guard isRunning else { return }
+        stateQueue.async { [weak self] in
+            guard let self else { return }
+            self.activeGeneration = 0
+            self.baselinePoint = nil
+            self.smoothedOffset = .zero
+            self.lastMoveDispatchTime = 0
+        }
 
         captureQueue.async { [weak self] in
             guard let self else { return }
-            self.captureSession.stopRunning()
+            if self.captureSession.isRunning {
+                self.captureSession.stopRunning()
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.isRunning = false
             }
         }
-
-        baselinePoint = nil
-        smoothedOffset = .zero
     }
 
-    private func startCaptureSession() {
+    private func beginStart() {
+        let token: UInt64 = stateQueue.sync {
+            nextGeneration &+= 1
+            activeGeneration = nextGeneration
+            return activeGeneration
+        }
         configureIfNeeded()
 
         captureQueue.async { [weak self] in
             guard let self else { return }
-            guard self.captureSession.isRunning == false else { return }
-            self.captureSession.startRunning()
+            let stillCurrent = self.stateQueue.sync { self.activeGeneration == token }
+            guard stillCurrent else { return }
+            if self.captureSession.isRunning == false {
+                self.captureSession.startRunning()
+            }
+            let remainsCurrent = self.stateQueue.sync { self.activeGeneration == token }
+            if remainsCurrent == false {
+                if self.captureSession.isRunning {
+                    self.captureSession.stopRunning()
+                }
+                DispatchQueue.main.async { [weak self] in
+                    self?.isRunning = false
+                }
+                return
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.isRunning = true
             }
@@ -104,6 +128,8 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
     }
 
     private func handle(sampleBuffer: CMSampleBuffer) {
+        let token = stateQueue.sync { activeGeneration }
+        guard token != 0 else { return }
         frameCounter += 1
         guard frameCounter % 3 == 0 else { return }
         guard isAnalyzingFrame == false else { return }
@@ -121,7 +147,7 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
                 return
             }
 
-            self.process(gazePoint: gazePoint)
+            self.process(gazePoint: gazePoint, generation: token)
         }
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .leftMirrored, options: [:])
@@ -174,7 +200,14 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
         )
     }
 
-    private func process(gazePoint: CGPoint) {
+    private func process(gazePoint: CGPoint, generation: UInt64) {
+        stateQueue.async { [weak self] in
+            self?.processOnStateQueue(gazePoint: gazePoint, generation: generation)
+        }
+    }
+
+    private func processOnStateQueue(gazePoint: CGPoint, generation: UInt64) {
+        guard activeGeneration == generation else { return }
         if baselinePoint == nil {
             baselinePoint = gazePoint
             return

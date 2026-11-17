@@ -31,12 +31,25 @@ actor MacScreenCaptureProvider {
     private var audioSampleHandler: ((CapturedAudioSampleBuffer) -> Void)?
     private var activeCaptureRouteLabel: String = "Unknown"
     private var preferFallbackDisplay = false
+    private var captureEnabled = true
+
+    func resumeCaptureForPairedClient() {
+        captureEnabled = true
+    }
+
+    func suspendForIdleClients() async {
+        captureEnabled = false
+        audioCaptureSource = .off
+        await stopCapture()
+    }
 
     func makeFramePixelBuffer(maxWidth: CGFloat = 1920) async -> CapturedPixelBuffer? {
+        guard captureEnabled else { return nil }
         do {
             if contentFilter == nil {
                 try await prepareCaptureFilter()
             }
+            guard captureEnabled else { return nil }
 
             guard let filter = contentFilter,
                   sourceWidth > 0,
@@ -45,6 +58,10 @@ actor MacScreenCaptureProvider {
             }
 
             try await ensureCaptureStream(filter: filter, maxWidth: maxWidth)
+            guard captureEnabled else {
+                await stopCapture()
+                return nil
+            }
             return latestPixelBuffer
         } catch {
             return nil

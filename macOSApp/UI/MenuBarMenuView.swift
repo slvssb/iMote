@@ -136,6 +136,16 @@ struct MenuBarMenuView: View {
             Text("\(appState.trustedDevices.count) trusted")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if appState.hostFingerprint.isEmpty == false {
+                Text("This Mac \(appState.hostFingerprint)")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+            }
+            if let fingerprint = appState.lastPinnedFingerprint {
+                Text(appState.lastPinnedFingerprintIsNew ? "New iPhone \(fingerprint)" : "iPhone \(fingerprint)")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+            }
             Button("Clear trusted devices") {
                 appState.clearTrustedDevices()
             }

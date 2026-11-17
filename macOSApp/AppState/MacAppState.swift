@@ -36,6 +36,9 @@ final class MacAppState: ObservableObject {
     @Published var effectiveQualityMode: PreviewQualityMode = .ultra
     @Published var audioCaptureSource: AudioCaptureSource = .off
     @Published var thermalOverrideActive = false
+    @Published var hostFingerprint = ""
+    @Published var lastPinnedFingerprint: String?
+    @Published var lastPinnedFingerprintIsNew = false
 
     var trustedDevicesCount: Int { trustedDevices.count }
 
@@ -191,6 +194,13 @@ final class MacAppState: ObservableObject {
             self?.effectiveQualityMode = status.effectiveQuality
             self?.audioCaptureSource = status.audioSource
             self?.thermalOverrideActive = status.thermalOverrideActive
+        }
+
+        hostFingerprint = server.localSigningFingerprint
+        server.onIdentityPinned = { [weak self] fingerprint, isNew in
+            self?.lastPinnedFingerprint = fingerprint
+            self?.lastPinnedFingerprintIsNew = isNew
+            self?.refreshPairingSnapshot()
         }
     }
 

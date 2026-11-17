@@ -22,5 +22,7 @@
 	<string>1</string>
 	<key>LSUIElement</key>
 	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>iMote streams this Mac's microphone to your paired iPhone when you choose Mic or Both.</string>
 </dict>
 </plist>

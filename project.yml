@@ -48,6 +48,7 @@ targets:
       properties:
         CFBundleDisplayName: iMote Host
         LSUIElement: false
+        NSMicrophoneUsageDescription: iMote streams this Mac's microphone to your paired iPhone when you choose Mic or Both.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.slvssb.imote.host

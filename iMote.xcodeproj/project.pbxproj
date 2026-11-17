@@ -40,6 +40,12 @@
 		EC0E9A83442F46E768DE86AE /* LiquidGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7FE07A98A15914F482BCFF /* LiquidGlass.swift */; };
 		F36EB551B89A95635967EEF4 /* KeyboardKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48B64DEDE8DA2202F1905FB6 /* KeyboardKey.swift */; };
 		F87C5BA31D4641564A3AA785 /* RemoteKeyboardProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */; };
+		A1F1A1F1A1F1A1F1A1F10002 /* IdentityFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */; };
+		A1F1A1F1A1F1A1F1A1F10003 /* IdentityFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */; };
+		A1F1A1F1A1F1A1F1A1F10005 /* SecureChannelCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */; };
+		A1F1A1F1A1F1A1F1A1F10006 /* SecureChannelCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */; };
+		A1F1A1F1A1F1A1F1A1F10008 /* SigningIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */; };
+		A1F1A1F1A1F1A1F1A1F10009 /* SigningIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -66,6 +72,9 @@
 		A1B2C3D4E5F6012345678903 /* iMote.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = iMote.icon; sourceTree = "<group>"; };
 		A30B15F95157EBCD2481742E /* IMoteiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMoteiOSApp.swift; sourceTree = "<group>"; };
 		A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteKeyboardProtocol.swift; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityFingerprint.swift; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureChannelCodec.swift; sourceTree = "<group>"; };
+		A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningIdentityStore.swift; sourceTree = "<group>"; };
 		C0DE6379HOSTENDPTCAT001 /* HostEndpointCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostEndpointCatalog.swift; sourceTree = "<group>"; };
 		C0DE6379HOSTMAINWINDOW01 /* HostMainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostMainWindow.swift; sourceTree = "<group>"; };
 		C0DE6379REMOTEHOSTADDR01 /* RemoteHostAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHostAddress.swift; sourceTree = "<group>"; };
@@ -271,11 +280,22 @@
 			path = macOSApp;
 			sourceTree = "<group>";
 		};
+		A1F1A1F1A1F1A1F1A1F1000A /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				A1F1A1F1A1F1A1F1A1F10001 /* IdentityFingerprint.swift */,
+				A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */,
+				A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
 		D7973A45CDD7967AC6C70734 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
 				6D6E5F3A5351EFA9522EB8FB /* Input */,
 				0CFA137CE9A9803390A52CF0 /* Protocol */,
+				A1F1A1F1A1F1A1F1A1F1000A /* Security */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -393,6 +413,9 @@
 				7B495C10B03F7C21BC7B604F /* PairingManager.swift in Sources */,
 				445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */,
 				F87C5BA31D4641564A3AA785 /* RemoteKeyboardProtocol.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10003 /* IdentityFingerprint.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10006 /* SecureChannelCodec.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10009 /* SigningIdentityStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -413,6 +436,9 @@
 				185671B290F060D34E4FD573 /* KeyboardKey.swift in Sources */,
 				EC0E9A83442F46E768DE86AE /* LiquidGlass.swift in Sources */,
 				3B321DF188E6DA67E424EA2C /* RemoteKeyboardProtocol.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10002 /* IdentityFingerprint.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10005 /* SecureChannelCodec.swift in Sources */,
+				A1F1A1F1A1F1A1F1A1F10008 /* SigningIdentityStore.swift in Sources */,
 				5BA8D4731CB7DD70F5E2BAE7 /* IMoteiOSApp.swift in Sources */,
 				3413DD972F8050EA0086D1D8 /* EyeCursorController.swift in Sources */,
 			);

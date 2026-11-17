@@ -127,6 +127,14 @@ final class ScreenPreviewState: ObservableObject {
         hostCaptureStatusLabel = "Host: \(normalizedRoute) • \(displaySummary) • \(activitySummary)"
     }
 
+    func noteCaptureDidNotStart() {
+        guard hasFrame == false else { return }
+        statsLabel = "No preview — input is ready"
+        if hostCaptureStatusLabel == "Host: unknown" {
+            hostCaptureStatusLabel = "No frames yet. Check Screen Recording on the Mac."
+        }
+    }
+
     private func recordArrival() {
         let now = Date()
         lastFrameReceivedAt = now
