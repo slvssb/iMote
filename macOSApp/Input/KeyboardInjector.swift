@@ -94,7 +94,7 @@ final class KeyboardInjector {
             current = clampedPoint(current, to: bounds)
         }
         let adjustedDelta = adjustedEdgeAwareDelta(from: current, deltaX: deltaX, deltaY: deltaY)
-        let rawNextPoint = CGPoint(x: current.x + adjustedDelta.x, y: current.y - adjustedDelta.y)
+        let rawNextPoint = CGPoint(x: current.x + adjustedDelta.x, y: current.y + adjustedDelta.y)
         let nextPoint = clampedPointToActiveDisplays(rawNextPoint)
         let moveEventType = mouseMoveEventTypeForPressedButtons()
         let moveButton = mouseButtonForPressedButtons()
@@ -527,7 +527,7 @@ final class KeyboardInjector {
         }
 
         if yEdgeFactor > 0 {
-            let movingOutwardY = (isNearBottom && deltaY > 0) || (isNearBottom == false && deltaY < 0)
+            let movingOutwardY = (isNearBottom && deltaY < 0) || (isNearBottom == false && deltaY > 0)
             if movingOutwardY {
                 adjustedY *= (1 - (0.30 * yEdgeFactor))
             }
