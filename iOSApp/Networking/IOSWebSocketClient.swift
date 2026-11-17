@@ -156,7 +156,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         await withCheckedContinuation { continuation in
             sendMessage(
                 RemoteMessage.trustControl(action: .forgetCurrentDevice, token: pairedToken, deviceID: deviceIdentifier),
-                completion: { sent in
+                completion: { @Sendable sent in
                     continuation.resume(returning: sent)
                 }
             )
@@ -180,7 +180,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(.pair(code: code, deviceName: deviceName, deviceID: deviceIdentifier))
     }
 
-    private func sendMessage(_ message: RemoteMessage, completion: ((Bool) -> Void)? = nil) {
+    private func sendMessage(_ message: RemoteMessage, completion: (@Sendable (Bool) -> Void)? = nil) {
         guard let task else {
             completion?(false)
             return
@@ -190,6 +190,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             if shouldEncryptOutgoingControl(message: message) {
                 guard let key = controlChannelKey else {
                     // Avoid leaking control intent before authenticated secure handshake is complete.
+                    completion?(false)
                     return
                 }
                 let plaintext = try RemoteProtocolCodec.encode(message)
