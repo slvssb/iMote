@@ -21,19 +21,22 @@ This app is designed for personal devices on trusted networks.
 - Discovery: Bonjour (`_rkbd._tcp`) on the local network only. Bonjour does not cross a tailnet, and that path is unchanged.
 - Remote reachability: the iPhone stores hosts you enter (a Tailscale MagicDNS name or a `100.x` address, plus the port) and can reconnect to them later. The host shows the addresses it can be reached at, including its Tailscale name and address when Tailscale is running.
 - Listener: `ws://` on port `8989` by default, bound on every interface so a connection that arrives on Tailscale's `utun` interface is accepted. There is still no TLS in the app.
-- Tailscale encrypts the path between your devices with WireGuard. That does not replace pairing, the session token, trusted-device checks, or the app-layer channel, and a tailnet address does not skip any of them.
-- Post-pairing transport: app-layer authenticated encryption for control and media channels.
-- Trust boundary: pairing code + session token + trusted device IDs + pinned signing keys.
+- Tailscale encrypts the path between your devices with WireGuard. That does not replace pairing, the session token, trusted-device checks, or the app-layer channel, and a tailnet address does not skip any of them. Every tailnet peer that can open port 8989 can attempt pairing.
+- Post-pairing transport: app-layer authenticated encryption for every message after the handshake, including ping, cursor position, stream status, and permission status. Pairing and the handshake themselves are still plaintext on `ws://`.
+- Trust boundary: a single-use pairing code, a session token, a device id recorded only after a verified handshake, and a signing key pinned only after that signature checks out.
+- Protocol: version 2. A phone or Mac on an older build is rejected with an update message. They do not fall through into the old handshake.
 - Main risk if the network is untrusted: anyone who can route to the listener port can still probe it before pairing, and transport metadata is not protected by TLS. Do not publish this port on a public interface. A tailnet you control is in scope. The open internet is not.
 
 Current mitigations:
 
-- 6-digit rotating pairing code.
-- Session token required for privileged actions.
-- Curve25519 handshake with signed ephemeral keys.
-- ChaChaPoly encryption for secure control/media payloads after pairing.
-- Trusted-device management controls on both Mac and iOS.
-- Device signing-key pinning for trusted peers.
+- 6-digit pairing code. A successful guess burns it. Failed guesses wait, and five failures rotate it.
+- A trusted phone can reconnect without a code only when its signing key is already pinned. The id is added to that set only after the handshake signature verifies.
+- Curve25519 handshake with signed ephemeral keys. The signature is checked before either side writes a pin. A bad hello does not stick.
+- Clear, Remove, and Forget delete the pin as well as the trusted id. The Mac window, menu bar, and iPhone show a fingerprint on first pair.
+- ChaChaPoly with a direction and a counter in the associated data, so a captured control or media box cannot be replayed. The outer `secureControl` frame does not carry the session token.
+- Signing private keys live in the keychain, this device only. An older preferences copy is deleted and not imported, so both apps pair again with new keys.
+- Host audio is AAC-LC. Capture and the microphone stop when the last paired phone leaves.
+- Shortcuts and shifted characters are resolved from the Mac's current keyboard layout.
 - Saved remote hosts are local to the iPhone. They are addresses, not credentials.
 
 Not a hardened remote administration solution yet:
@@ -66,17 +69,16 @@ Not a hardened remote administration solution yet:
 
 ## Protocol Examples
 
+Pairing and the handshake carry `protocolVersion`. After the handshake, control messages (text, keys, ping, and the host's cursor and status) are the plaintext inside `secureControl`, not separate frames.
+
 ```json
-{ "type": "pair", "code": "123456", "deviceName": "Selva iPhone" }
-{ "type": "pairAck", "success": true, "token": "..." }
-{ "type": "e2eHello", "deviceID": "...", "signingPublicKey": "...", "ephemeralPublicKey": "...", "signature": "...", "token": "..." }
-{ "type": "text", "value": "h", "token": "..." }
-{ "type": "key", "key": "c", "modifiers": ["command"], "action": "tap", "token": "..." }
-{ "type": "streamConfig", "qualityMode": "ultra", "token": "..." }
-{ "type": "audioConfig", "audioSource": "systemOutput", "token": "..." }
-{ "type": "trustControl", "trustAction": "forgetCurrentDevice", "deviceID": "...", "token": "..." }
-{ "type": "streamStatus", "thermalOverrideActive": true, "captureRoute": "Real", "hostDisplayCount": 1, "previewCaptureActive": true }
+{ "type": "pair", "code": "123456", "deviceName": "Selva iPhone", "deviceID": "...", "protocolVersion": 2 }
+{ "type": "pairAck", "success": true, "token": "...", "deviceID": "...", "protocolVersion": 2 }
+{ "type": "e2eHello", "deviceID": "...", "signingPublicKey": "...", "ephemeralPublicKey": "...", "signature": "...", "token": "...", "protocolVersion": 2 }
+{ "type": "secureControl", "securePayload": "<base64 ChaChaPoly box>" }
 ```
+
+A missing or different `protocolVersion` fails the pair. The inner payload is still the same JSON (`text`, `key`, `streamConfig`, `audioConfig`, `trustControl`, `ping`, `cursorPosition`, `streamStatus`), sealed with the direction and counter as associated data.
 
 ## Build
 
@@ -151,6 +153,7 @@ In CLI mode the host prints:
 
 - current listener state
 - pairing code + expiry
+- this Mac's signing fingerprint, and the iPhone fingerprint after a pair
 - accessibility status
 - reachable LAN and Tailscale addresses
 - connected device names
@@ -163,7 +166,8 @@ Notes for CLI mode:
 ## Notes
 
 - Host listens on port `8989` on all interfaces, including Tailscale's interface when Tailscale is running, and advertises `_rkbd._tcp` on the local network only.
-- Key mapping assumes US keyboard layout for MVP (`KeyCodeMapper`).
+- Shortcuts and capitals follow the Mac's current keyboard layout. Named keys such as Return and the arrows stay on fixed virtual keycodes.
+- Protocol version is 2. Update the iPhone and the Mac together. An older build stops with an update message instead of pairing.
 - iOS background execution is limited by platform policy.
 - The iPhone preview strip can show host capture diagnostics such as route (`Real` / `Dummy/Fallback` / `Unknown`), online display count, and whether preview frames are currently live.
 - Preview quality remains user-selectable unless thermal override is active.
@@ -173,11 +177,11 @@ Notes for CLI mode:
 
 - Keyboard/mouse commands and preview frames are exchanged directly between your iPhone and Mac host, either on the local network or over a tailnet you control. There is no relay in this app.
 - Saved remote hosts (name or IP, and port) are stored on the iPhone. Trusted-device display names are stored on the Mac.
-- After pairing, control and media payloads are protected by the app-layer secure channel.
+- After the handshake, control messages (including ping, cursor, and status) and media are protected by the app-layer secure channel. Pairing and the handshake are not.
 - The app does not include a cloud relay/backend in the current architecture.
-- Trusted device IDs are stored locally on the host (`UserDefaults`) for auto-reconnect trust.
-- Trusted device signing keys are also stored locally for peer pinning.
-- Screen preview requires macOS Screen Recording permission; input injection requires Accessibility permission.
+- Trusted device ids, display names, and peer signing-key pins are stored locally on the host. Forget, Remove, and Clear delete the pin with the id.
+- Each app's own signing private key is in the keychain with this-device-only protection. It is not kept in preferences, and an older preferences value is not copied in.
+- Screen preview requires macOS Screen Recording permission. Input injection requires Accessibility. Mic and Both also require the microphone, which the host asks for with a usage string.
 
 ## Legal and Safety
 
@@ -193,9 +197,8 @@ Try these after pairing:
 - Type `hello` on iPhone: should appear in active Mac text field.
 - Tap `⌫`: deletes one character.
 - Tap `↩`: sends return.
-- Enable `⌘` modifier + type `c`: sends `Cmd+C`.
+- Enable `⌘` modifier + type `c`: sends `Cmd+C` for the Mac's current layout, including a non-US layout.
 - Tap arrow buttons: moves cursor.
-- Change iPhone audio source to `System`, `Mic`, or `Both`: host audio should follow the selected mode.
-- Open iOS trusted-device controls and test:
-  - `Forget on Phone` clears local auto-reconnect trust
-  - `Forget on Mac` removes this iPhone from host trusted devices (requires paired session)
+- Change iPhone audio source to `System`, `Mic`, or `Both`: host audio should follow the selected mode, and the orange mic indicator should go away after the phone disconnects.
+- Compare the fingerprint on the iPhone with This Mac in the host window the first time you pair.
+- Forget trusted Mac on the iPhone, or Clear trusted devices on the Mac. The next connection needs a new code, and a bad pin does not survive the forget.
