@@ -40,6 +40,12 @@ final class MacWebSocketServer: @unchecked Sendable {
         var outstandingBytes: Int = 0
     }
 
+    private struct ClientMediaRequest {
+        var quality: PreviewQualityMode?
+        var zoom: Double?
+        var audio: AudioCaptureSource?
+    }
+
     private struct SecureSession {
         let clientDeviceID: String
         let controlKey: SymmetricKey
@@ -68,6 +74,8 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var listener: NWListener?
     private var listenerPort: UInt16 = 8989
     private var clients: [UUID: ClientContext] = [:]
+    private var mediaRequests: [UUID: ClientMediaRequest] = [:]
+    private var mediaOwnerID: UUID?
     private var frameTimer: DispatchSourceTimer?
     private var isFrameCaptureInFlight = false
     private var consecutiveFrameFailures = 0
@@ -333,6 +341,8 @@ final class MacWebSocketServer: @unchecked Sendable {
             context.connection.cancel()
         }
         clients.removeAll()
+        mediaRequests.removeAll()
+        mediaOwnerID = nil
         listener?.cancel()
         listener = nil
         stopFrameBroadcasting()
@@ -386,6 +396,11 @@ final class MacWebSocketServer: @unchecked Sendable {
         injector.releasePressedMouseButtons(for: id)
         if let removed = clients.removeValue(forKey: id) {
             pairingManager.revoke(token: removed.token)
+        }
+        mediaRequests.removeValue(forKey: id)
+        if mediaOwnerID == id {
+            mediaOwnerID = clients.keys.first { mediaRequests[$0] != nil }
+            applyStoredMediaRequest(mediaOwnerID.flatMap { mediaRequests[$0] })
         }
         publishClients()
         refreshCaptureForConnectedPhones()
@@ -767,10 +782,18 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard let mode = message.qualityMode else { return }
-        userSelectedQualityMode = mode
-        if let zoomLevel = message.previewZoomLevel {
-            requestedPreviewZoomLevel = min(max(zoomLevel, 1.0), 3.0)
+        let zoom = min(max(message.previewZoomLevel ?? requestedPreviewZoomLevel, 1.0), 3.0)
+        if mediaRequestConflicts(with: id, quality: mode, zoom: zoom, audio: nil) {
+            send(.error("Another iPhone is already controlling preview quality."), to: id)
+            return
         }
+        var request = mediaRequests[id] ?? ClientMediaRequest()
+        request.quality = mode
+        request.zoom = zoom
+        mediaRequests[id] = request
+        claimMediaOwner(id)
+        userSelectedQualityMode = mode
+        requestedPreviewZoomLevel = zoom
         applyEffectiveQualityMode()
         publishMediaStatus()
     }
@@ -794,6 +817,14 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         guard let source = message.audioSource else { return }
+        if mediaRequestConflicts(with: id, quality: nil, zoom: nil, audio: source) {
+            send(.error("Another iPhone is already controlling the audio source."), to: id)
+            return
+        }
+        var request = mediaRequests[id] ?? ClientMediaRequest()
+        request.audio = source
+        mediaRequests[id] = request
+        claimMediaOwner(id)
         selectedAudioCaptureSource = source
         aacEncoder.resetMix()
         Task {
@@ -844,12 +875,67 @@ final class MacWebSocketServer: @unchecked Sendable {
         guard let action = message.trustAction else { return }
         switch action {
         case .forgetCurrentDevice:
-            guard let deviceID = message.deviceID, deviceID.isEmpty == false else {
-                send(.error("Missing device identifier for trust action"), to: id)
+            guard let session = clients[id]?.secureSession else {
+                send(.error("Unauthorized secure control session"), to: id)
                 return
             }
-            pairingManager.removeTrustedDevice(deviceID: deviceID)
+            if let requested = message.deviceID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               requested.isEmpty == false,
+               requested != session.clientDeviceID {
+                send(.error("You can only forget this iPhone."), to: id)
+                return
+            }
+            pairingManager.removeTrustedDevice(deviceID: session.clientDeviceID)
         }
+    }
+
+    private func mediaRequestConflicts(
+        with id: UUID,
+        quality: PreviewQualityMode?,
+        zoom: Double?,
+        audio: AudioCaptureSource?
+    ) -> Bool {
+        guard let owner = mediaOwnerID, owner != id, clients[owner] != nil else { return false }
+        let ownerRequest = mediaRequests[owner]
+        if let quality {
+            let ownerQuality = ownerRequest?.quality ?? userSelectedQualityMode
+            if ownerQuality != quality { return true }
+        }
+        if let zoom {
+            let ownerZoom = ownerRequest?.zoom ?? requestedPreviewZoomLevel
+            if abs(ownerZoom - zoom) > 0.01 { return true }
+        }
+        if let audio {
+            let ownerAudio = ownerRequest?.audio ?? selectedAudioCaptureSource
+            if ownerAudio != audio { return true }
+        }
+        return false
+    }
+
+    private func claimMediaOwner(_ id: UUID) {
+        if mediaOwnerID == nil || clients[mediaOwnerID!] == nil {
+            mediaOwnerID = id
+        }
+    }
+
+    private func applyStoredMediaRequest(_ request: ClientMediaRequest?) {
+        guard let request else { return }
+        if let quality = request.quality {
+            userSelectedQualityMode = quality
+        }
+        if let zoom = request.zoom {
+            requestedPreviewZoomLevel = zoom
+        }
+        if let audio = request.audio, audio != selectedAudioCaptureSource {
+            selectedAudioCaptureSource = audio
+            aacEncoder.resetMix()
+            Task {
+                await screenCaptureProvider.setAudioCaptureSource(audio)
+            }
+            aacEncoder.requestStreamResync()
+        }
+        applyEffectiveQualityMode()
+        publishMediaStatus()
     }
 
     private func authorize(id: UUID, token: String?) -> Bool {
