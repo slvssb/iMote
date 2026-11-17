@@ -26,6 +26,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onThermalOverrideChanged: ((Bool) -> Void)?
     var onHostCaptureStatusChanged: ((String?, Int?, Bool?) -> Void)?
     var onPermissionStatus: ((Bool, Bool) -> Void)?
+    var onHostFingerprintPinned: ((String, Bool) -> Void)?
 
     private var session: URLSession!
     private var task: URLSessionWebSocketTask?
@@ -246,7 +247,11 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             case .error:
                 let reason = decoded.reason ?? "Unknown error"
                 onRemoteError?(reason)
-                state = .failed(reason)
+                if hasCompletedSecureHandshake == false {
+                    shouldReconnect = false
+                    state = .failed(reason)
+                    task?.cancel(with: .normalClosure, reason: nil)
+                }
             case .e2eHelloAck:
                 handleSecureHelloAck(decoded)
             case .screenFrame:
@@ -439,19 +444,26 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             return
         }
 
-        guard verifyOrPinHostSigningKey(hostDeviceID: hostDeviceID, signingPublicKeyBase64: hostSigningPublicKeyBase64) else {
-            handleError("Host identity key mismatch. Re-pair required.")
+        let hostSigningPublicKey: Curve25519.Signing.PublicKey
+        do {
+            hostSigningPublicKey = try Curve25519.Signing.PublicKey(rawRepresentation: hostSigningPublicKeyData)
+        } catch {
+            handleError("Malformed secure handshake response")
+            return
+        }
+        let signaturePayload = Self.signaturePayload(token: token, deviceID: hostDeviceID, ephemeralPublicKey: hostEphemeralPublicKeyData)
+        guard hostSigningPublicKey.isValidSignature(signatureData, for: signaturePayload) else {
+            handleError("Invalid secure handshake signature")
+            return
+        }
+
+        let pin = pinHostSigningKey(hostDeviceID: hostDeviceID, signingPublicKeyBase64: hostSigningPublicKeyBase64)
+        guard pin != .mismatch else {
+            handleError("Host identity key mismatch. Forget this Mac on the iPhone and pair again.")
             return
         }
 
         do {
-            let hostSigningPublicKey = try Curve25519.Signing.PublicKey(rawRepresentation: hostSigningPublicKeyData)
-            let signaturePayload = Self.signaturePayload(token: token, deviceID: hostDeviceID, ephemeralPublicKey: hostEphemeralPublicKeyData)
-            guard hostSigningPublicKey.isValidSignature(signatureData, for: signaturePayload) else {
-                handleError("Invalid secure handshake signature")
-                return
-            }
-
             let hostEphemeralPublicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: hostEphemeralPublicKeyData)
             let sharedSecret = try ephemeralPrivateKey.sharedSecretFromKeyAgreement(with: hostEphemeralPublicKey)
             let salt = Data(token.utf8)
@@ -470,9 +482,22 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             hasCompletedSecureHandshake = true
             state = .paired
             startPing()
+            let fingerprint = IdentityFingerprint.displayString(forPublicKey: hostSigningPublicKeyData)
+            onHostFingerprintPinned?(fingerprint, pin == .pinnedNew)
         } catch {
+            if pin == .pinnedNew {
+                rollbackHostPin(hostDeviceID: hostDeviceID)
+            }
             handleError("Failed to finalize secure handshake")
         }
+    }
+
+    func clearTrustedHostPins() {
+        UserDefaults.standard.removeObject(forKey: Self.hostSigningKeysDefaultsKey)
+    }
+
+    var localSigningFingerprint: String {
+        IdentityFingerprint.displayString(forPublicKey: localSigningPrivateKey.publicKey.rawRepresentation)
     }
 
     private static func signaturePayload(token: String, deviceID: String, ephemeralPublicKey: Data) -> Data {
@@ -499,15 +524,28 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         return created
     }
 
-    private func verifyOrPinHostSigningKey(hostDeviceID: String, signingPublicKeyBase64: String) -> Bool {
-        let keyName = "remoteKeyboard.ios.trustedHostSigningKeys"
-        var map = UserDefaults.standard.dictionary(forKey: keyName) as? [String: String] ?? [:]
+    private static let hostSigningKeysDefaultsKey = "remoteKeyboard.ios.trustedHostSigningKeys"
+
+    private enum HostPinResult {
+        case matchedExisting
+        case pinnedNew
+        case mismatch
+    }
+
+    private func pinHostSigningKey(hostDeviceID: String, signingPublicKeyBase64: String) -> HostPinResult {
+        var map = UserDefaults.standard.dictionary(forKey: Self.hostSigningKeysDefaultsKey) as? [String: String] ?? [:]
         if let existing = map[hostDeviceID] {
-            return existing == signingPublicKeyBase64
+            return existing == signingPublicKeyBase64 ? .matchedExisting : .mismatch
         }
         map[hostDeviceID] = signingPublicKeyBase64
-        UserDefaults.standard.set(map, forKey: keyName)
-        return true
+        UserDefaults.standard.set(map, forKey: Self.hostSigningKeysDefaultsKey)
+        return .pinnedNew
+    }
+
+    private func rollbackHostPin(hostDeviceID: String) {
+        var map = UserDefaults.standard.dictionary(forKey: Self.hostSigningKeysDefaultsKey) as? [String: String] ?? [:]
+        map.removeValue(forKey: hostDeviceID)
+        UserDefaults.standard.set(map, forKey: Self.hostSigningKeysDefaultsKey)
     }
 }
 

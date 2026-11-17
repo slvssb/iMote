@@ -3,6 +3,7 @@ import Foundation
 struct TrustedDeviceRecord: Identifiable, Equatable, Sendable {
     var id: String
     var name: String?
+    var fingerprint: String?
 
     var displayName: String {
         if let name {
@@ -154,7 +155,11 @@ final class PairingManager {
     func trustedDevices() -> [TrustedDeviceRecord] {
         withLock {
             trustedDeviceIDs.map { id in
-                TrustedDeviceRecord(id: id, name: trustedDeviceNames[id])
+                TrustedDeviceRecord(
+                    id: id,
+                    name: trustedDeviceNames[id],
+                    fingerprint: fingerprint(forSigningKey: trustedDeviceSigningKeys[id])
+                )
             }
             .sorted { lhs, rhs in
                 lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
@@ -177,8 +182,10 @@ final class PairingManager {
         withLock {
             trustedDeviceIDs.removeAll()
             trustedDeviceNames.removeAll()
+            trustedDeviceSigningKeys.removeAll()
             persistTrustedDevices()
             persistTrustedDeviceNames()
+            persistTrustedSigningKeys()
         }
     }
 
@@ -193,15 +200,37 @@ final class PairingManager {
         }
     }
 
-    func verifyOrPinSigningKey(deviceID: String, signingPublicKeyBase64: String) -> Bool {
+    enum SigningPinResult {
+        case matchedExisting
+        case pinnedNew
+        case mismatch
+    }
+
+    /// Call only after the handshake signature has been verified.
+    func pinSigningKeyAfterVerification(deviceID: String, signingPublicKeyBase64: String) -> SigningPinResult {
         withLock {
             if let existing = trustedDeviceSigningKeys[deviceID] {
-                return existing == signingPublicKeyBase64
+                return existing == signingPublicKeyBase64 ? .matchedExisting : .mismatch
             }
             trustedDeviceSigningKeys[deviceID] = signingPublicKeyBase64
             persistTrustedSigningKeys()
-            return true
+            return .pinnedNew
         }
+    }
+
+    func rollbackNewSigningPin(deviceID: String) {
+        withLock {
+            trustedDeviceSigningKeys.removeValue(forKey: deviceID)
+            persistTrustedSigningKeys()
+        }
+    }
+
+    private func fingerprint(forSigningKey signingPublicKeyBase64: String?) -> String? {
+        guard let signingPublicKeyBase64,
+              let data = Data(base64Encoded: signingPublicKeyBase64) else {
+            return nil
+        }
+        return IdentityFingerprint.displayString(forPublicKey: data)
     }
 
     func pinnedSigningKey(deviceID: String) -> String? {

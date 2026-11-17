@@ -545,6 +545,7 @@ private struct MacCenteredLogoOverlay: View {
                 ScrollView {
                     VStack(spacing: Layout.sectionSpacing) {
                         previewControlsPanel
+                        fingerprintCaption
                         Button("Disconnect", role: .destructive) {
                             beginControlledDisconnectSequence(forgetDevice: false)
                             isConfigSheetPresented = false
@@ -752,6 +753,16 @@ private struct MacCenteredLogoOverlay: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
+
+                fingerprintCaption
+
+                if viewModel.hasTrustedSessionLocally {
+                    Button("Forget trusted Mac") {
+                        viewModel.forgetTrustedSessionOnPhone()
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
             }
             .padding(.top, 64)
 
@@ -776,6 +787,27 @@ private struct MacCenteredLogoOverlay: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var fingerprintCaption: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("This iPhone \(viewModel.localSigningFingerprint)")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            if let macFingerprint = viewModel.pairedHostFingerprint {
+                Text("Mac \(macFingerprint)")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                if viewModel.pairedHostFingerprintIsNew {
+                    Text("First pair. Compare these fingerprints with the Mac before you type.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1193,10 +1225,20 @@ private struct MacCenteredLogoOverlay: View {
     }
 
     private var previewStatsStrip: some View {
-        PreviewStatsStripView(preview: viewModel.screenPreview) {
-            focusedField = nil
-            dismissTypingCapture()
-            isConfigSheetPresented = true
+        VStack(spacing: 6) {
+            PreviewStatsStripView(preview: viewModel.screenPreview) {
+                focusedField = nil
+                dismissTypingCapture()
+                isConfigSheetPresented = true
+            }
+            if showConnectedLayout, let error = viewModel.lastError, error.isEmpty == false {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .padding(.horizontal, 16)
+            }
         }
     }
 

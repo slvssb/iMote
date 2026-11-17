@@ -201,6 +201,12 @@ private final class MacHostCLIRunner: NSObject {
         server.onRuntimeError = { reason in
             print("[iMote] Runtime error: \(reason)")
         }
+
+        print("[iMote] This Mac fingerprint: \(server.localSigningFingerprint)")
+        server.onIdentityPinned = { fingerprint, isNew in
+            let label = isNew ? "New iPhone fingerprint" : "iPhone fingerprint"
+            print("[iMote] \(label): \(fingerprint)")
+        }
     }
 
     private func startPairingTicker() {

@@ -47,6 +47,8 @@ final class IOSKeyboardViewModel: ObservableObject {
         screenRecordingGranted: false
     )
     @Published private(set) var hasCompletedPermissionGate = false
+    @Published var pairedHostFingerprint: String?
+    @Published var pairedHostFingerprintIsNew = false
 
     let screenPreview = ScreenPreviewState()
 
@@ -86,6 +88,10 @@ final class IOSKeyboardViewModel: ObservableObject {
 
     var hasTrustedSessionLocally: Bool {
         hasTrustedSession
+    }
+
+    var localSigningFingerprint: String {
+        client.localSigningFingerprint
     }
 
     var shouldShowPermissionGate: Bool {
@@ -276,6 +282,12 @@ final class IOSKeyboardViewModel: ObservableObject {
                 displayCount: displayCount,
                 isActive: isActive
             )
+        }
+
+        client.onHostFingerprintPinned = { [weak self] fingerprint, isNew in
+            guard let self else { return }
+            self.pairedHostFingerprint = fingerprint
+            self.pairedHostFingerprintIsNew = isNew
         }
 
         client.onPermissionStatus = { [weak self] accessibilityGranted, screenRecordingGranted in
@@ -504,12 +516,14 @@ final class IOSKeyboardViewModel: ObservableObject {
     func forgetTrustedSessionOnPhone() {
         hasTrustedSession = false
         pairingCode = ""
+        client.clearTrustedHostPins()
+        pairedHostFingerprint = nil
+        pairedHostFingerprintIsNew = false
     }
 
     func forgetCurrentDeviceTrustOnMac() {
         client.sendForgetCurrentDeviceTrust()
-        hasTrustedSession = false
-        pairingCode = ""
+        forgetTrustedSessionOnPhone()
     }
 
     func refreshHostPermissionStatus() {

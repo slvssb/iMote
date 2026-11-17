@@ -19,6 +19,7 @@ struct HostMainWindow: View {
                 HostPairingSection(
                     code: appState.pairingCode,
                     secondsRemaining: appState.pairingSecondsRemaining,
+                    hostFingerprint: appState.hostFingerprint,
                     onRegenerate: { appState.regeneratePairCode() }
                 )
                 HostAddressesSection(
@@ -107,6 +108,7 @@ private struct HostListenerSection: View {
 private struct HostPairingSection: View {
     let code: String
     let secondsRemaining: Int
+    let hostFingerprint: String
     let onRegenerate: () -> Void
 
     var body: some View {
@@ -117,6 +119,13 @@ private struct HostPairingSection: View {
                 .textSelection(.enabled)
             Text("Expires in \(secondsRemaining)s")
                 .foregroundStyle(.secondary)
+            if hostFingerprint.isEmpty == false {
+                LabeledContent("This Mac") {
+                    Text(hostFingerprint)
+                        .font(.body.monospaced())
+                        .textSelection(.enabled)
+                }
+            }
             Button("Regenerate Code", action: onRegenerate)
         }
     }
@@ -223,6 +232,12 @@ private struct HostTrustedDevicesSection: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .textSelection(.enabled)
+                            if let fingerprint = device.fingerprint {
+                                Text(fingerprint)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
                         }
                         Spacer(minLength: 12)
                         Button("Remove") {
@@ -238,13 +253,13 @@ private struct HostTrustedDevicesSection: View {
         } header: {
             Text("Trusted Devices")
         } footer: {
-            Text("Trust lets that iPhone reconnect without a new pairing code. Removing a device does not change the encryption keys for anyone else.")
+            Text("Trust lets that iPhone reconnect without a new pairing code. Removing it also deletes its pinned signing key. On a first pair, compare the fingerprint with the iPhone.")
         }
         .alert("Clear trusted devices?", isPresented: $isClearConfirmationPresented) {
             Button("Clear", role: .destructive, action: onClear)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Paired iPhones will need a new pairing code.")
+            Text("Paired iPhones will need a new pairing code. Their pinned signing keys are deleted too.")
         }
     }
 }

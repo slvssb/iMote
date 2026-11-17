@@ -26,6 +26,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     var onRuntimeError: ((String) -> Void)?
     var onCaptureRouteChange: ((String) -> Void)?
     var onMediaStatusChange: ((MediaStatus) -> Void)?
+    var onIdentityPinned: ((String, Bool) -> Void)?
 
     private struct ClientContext {
         let id: UUID
@@ -495,27 +496,30 @@ final class MacWebSocketServer: @unchecked Sendable {
             return
         }
 
-        guard pairingManager.verifyOrPinSigningKey(deviceID: clientDeviceID, signingPublicKeyBase64: clientSigningKeyBase64) else {
-            send(.error("Client identity key mismatch"), to: id)
+        let clientSigningKey: Curve25519.Signing.PublicKey
+        do {
+            clientSigningKey = try Curve25519.Signing.PublicKey(rawRepresentation: clientSigningKeyData)
+        } catch {
+            send(.error("Malformed secure handshake payload"), to: id)
+            return
+        }
+        let signaturePayload = Self.signaturePayload(token: token, deviceID: clientDeviceID, ephemeralPublicKey: clientEphemeralData)
+        guard clientSigningKey.isValidSignature(signatureData, for: signaturePayload) else {
+            send(.error("Invalid secure handshake signature"), to: id)
             return
         }
 
+        let pin = pairingManager.pinSigningKeyAfterVerification(
+            deviceID: clientDeviceID,
+            signingPublicKeyBase64: clientSigningKeyBase64
+        )
+        guard pin != .mismatch else {
+            send(.error("Client identity key mismatch. Clear trusted devices on the Mac and pair again."), to: id)
+            return
+        }
+
+        var didConfirmTrust = false
         do {
-            let clientSigningKey = try Curve25519.Signing.PublicKey(rawRepresentation: clientSigningKeyData)
-            let signaturePayload = Self.signaturePayload(token: token, deviceID: clientDeviceID, ephemeralPublicKey: clientEphemeralData)
-            guard clientSigningKey.isValidSignature(signatureData, for: signaturePayload) else {
-                send(.error("Invalid secure handshake signature"), to: id)
-                return
-            }
-
-            guard pairingManager.confirmTrustedDeviceAfterHandshake(token: token, deviceID: clientDeviceID) else {
-                send(.error("Handshake device does not match the paired device."), to: id)
-                return
-            }
-            if let deviceName = clients[id]?.deviceName {
-                pairingManager.noteTrustedDevice(deviceID: clientDeviceID, name: deviceName)
-            }
-
             let hostEphemeralPrivateKey = Curve25519.KeyAgreement.PrivateKey()
             let hostEphemeralPublicData = hostEphemeralPrivateKey.publicKey.rawRepresentation
             let clientEphemeralPublicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: clientEphemeralData)
@@ -533,6 +537,18 @@ final class MacWebSocketServer: @unchecked Sendable {
                 sharedInfo: Data("iMote.e2e.media.v1".utf8),
                 outputByteCount: 32
             )
+
+            guard pairingManager.confirmTrustedDeviceAfterHandshake(token: token, deviceID: clientDeviceID) else {
+                if pin == .pinnedNew {
+                    pairingManager.rollbackNewSigningPin(deviceID: clientDeviceID)
+                }
+                send(.error("Handshake device does not match the paired device."), to: id)
+                return
+            }
+            didConfirmTrust = true
+            if let deviceName = clients[id]?.deviceName {
+                pairingManager.noteTrustedDevice(deviceID: clientDeviceID, name: deviceName)
+            }
 
             guard var context = clients[id] else { return }
             context.secureSession = SecureSession(clientDeviceID: clientDeviceID, controlKey: controlKey, mediaKey: mediaKey)
@@ -553,7 +569,15 @@ final class MacWebSocketServer: @unchecked Sendable {
             ), to: id)
             sendStreamStatus(to: id)
             publishClients()
+            let fingerprint = IdentityFingerprint.displayString(forPublicKey: clientSigningKeyData)
+            let isNewPin = pin == .pinnedNew
+            Task { @MainActor in
+                self.onIdentityPinned?(fingerprint, isNewPin)
+            }
         } catch {
+            if didConfirmTrust == false, pin == .pinnedNew {
+                pairingManager.rollbackNewSigningPin(deviceID: clientDeviceID)
+            }
             send(.error("Failed to establish secure channel"), to: id)
         }
     }
@@ -815,6 +839,10 @@ final class MacWebSocketServer: @unchecked Sendable {
         payload.append(contentsOf: Data("|".utf8))
         payload.append(ephemeralPublicKey)
         return payload
+    }
+
+    var localSigningFingerprint: String {
+        IdentityFingerprint.displayString(forPublicKey: localSigningPrivateKey.publicKey.rawRepresentation)
     }
 
     private static func loadOrCreateHostDeviceID() -> String {
