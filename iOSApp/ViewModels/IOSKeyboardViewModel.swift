@@ -146,10 +146,11 @@ final class IOSKeyboardViewModel: ObservableObject {
                 if self.selectedService == nil {
                     self.selectedService = updated.first
                 } else if let selected = self.selectedService {
-                    let stillPresent = updated.contains { service in
-                        service.host == selected.host && service.port == selected.port
-                    }
-                    if stillPresent == false {
+                    if let refreshed = updated.first(where: { service in
+                        service.name == selected.name && service.port == selected.port
+                    }) {
+                        self.selectedService = refreshed
+                    } else {
                         self.selectedService = updated.first
                     }
                 }
