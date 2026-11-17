@@ -12,7 +12,6 @@
 		3261C6035CBC1C82644C0DF8 /* IOSWebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4475252E2ACD2E5D3553A12B /* IOSWebSocketClient.swift */; };
 		3413DD7E2F7F041C0086D1D8 /* TrackpadSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD7D2F7F041C0086D1D8 /* TrackpadSurfaceView.swift */; };
 		3413DD812F7F058C0086D1D8 /* MacScreenCaptureProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD802F7F058C0086D1D8 /* MacScreenCaptureProvider.swift */; };
-		3413DDA12F81A0000086D1D8 /* VirtualDisplayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DDA02F81A0000086D1D8 /* VirtualDisplayManager.swift */; };
 		3413DD832F7F0E710086D1D8 /* ScreenPreviewState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD822F7F0E710086D1D8 /* ScreenPreviewState.swift */; };
 		3413DD8F2F7F15D50086D1D8 /* H264FrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD8E2F7F15D50086D1D8 /* H264FrameEncoder.swift */; };
 		3413DD912F7F15F80086D1D8 /* H264FrameDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3413DD902F7F15F80086D1D8 /* H264FrameDecoder.swift */; };
@@ -46,6 +45,8 @@
 		A1F1A1F1A1F1A1F1A1F10006 /* SecureChannelCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10004 /* SecureChannelCodec.swift */; };
 		A1F1A1F1A1F1A1F1A1F10008 /* SigningIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */; };
 		A1F1A1F1A1F1A1F1A1F10009 /* SigningIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A1F1A1F1A1F1A1F10007 /* SigningIdentityStore.swift */; };
+		C0DE6379PRIVACYIOS0002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C0DE6379PRIVACYIOS0001 /* PrivacyInfo.xcprivacy */; };
+		C0DE6379PRIVACYMAC0002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C0DE6379PRIVACYMAC0001 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,7 +56,6 @@
 		2D7FE07A98A15914F482BCFF /* LiquidGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiquidGlass.swift; sourceTree = "<group>"; };
 		3413DD7D2F7F041C0086D1D8 /* TrackpadSurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadSurfaceView.swift; sourceTree = "<group>"; };
 		3413DD802F7F058C0086D1D8 /* MacScreenCaptureProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacScreenCaptureProvider.swift; sourceTree = "<group>"; };
-		3413DDA02F81A0000086D1D8 /* VirtualDisplayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualDisplayManager.swift; sourceTree = "<group>"; };
 		3413DD822F7F0E710086D1D8 /* ScreenPreviewState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenPreviewState.swift; sourceTree = "<group>"; };
 		3413DD8E2F7F15D50086D1D8 /* H264FrameEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = H264FrameEncoder.swift; sourceTree = "<group>"; };
 		3413DD902F7F15F80086D1D8 /* H264FrameDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = H264FrameDecoder.swift; sourceTree = "<group>"; };
@@ -86,6 +86,8 @@
 		EA105BD98FA3EEC61C2743EA /* IOSKeyboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSKeyboardViewModel.swift; sourceTree = "<group>"; };
 		EE70ED41600E3174B32D10F7 /* AccessibilityPermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityPermissionManager.swift; sourceTree = "<group>"; };
 		EEE4FFDB46E24A20DC1C3B1E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C0DE6379PRIVACYIOS0001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		C0DE6379PRIVACYMAC0001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -120,6 +122,7 @@
 			children = (
 				D748496989F8D3202C8011AD /* ContentView.swift */,
 				D1CA03D8B26AEEF394F1FADC /* Info.plist */,
+				C0DE6379PRIVACYIOS0001 /* PrivacyInfo.xcprivacy */,
 				A30B15F95157EBCD2481742E /* IMoteiOSApp.swift */,
 				81C2EF69354165FA176CD490 /* Input */,
 				0255BFE2BF1901AEB12BD6CD /* Networking */,
@@ -136,14 +139,6 @@
 				3413DD802F7F058C0086D1D8 /* MacScreenCaptureProvider.swift */,
 			);
 			path = Capture;
-			sourceTree = "<group>";
-		};
-		3413DDA22F81A0000086D1D8 /* Display */ = {
-			isa = PBXGroup;
-			children = (
-				3413DDA02F81A0000086D1D8 /* VirtualDisplayManager.swift */,
-			);
-			path = Display;
 			sourceTree = "<group>";
 		};
 		3413DD8C2F7F15AA0086D1D8 /* Streaming */ = {
@@ -266,6 +261,7 @@
 			isa = PBXGroup;
 			children = (
 				EEE4FFDB46E24A20DC1C3B1E /* Info.plist */,
+				C0DE6379PRIVACYMAC0001 /* PrivacyInfo.xcprivacy */,
 				889865EECE778A1590EAFE31 /* IMoteMacApp.swift */,
 				61E8C5B71178F4A9DCDABD32 /* AppState */,
 				528D560E2185EA83EC0CD13A /* Input */,
@@ -274,7 +270,6 @@
 				55CE70AA788204EBB303A87A /* Security */,
 				C3ED65C905D65FA89562435A /* UI */,
 				3413DD7F2F7F058C0086D1D8 /* Capture */,
-				3413DDA22F81A0000086D1D8 /* Display */,
 				3413DD8C2F7F15AA0086D1D8 /* Streaming */,
 			);
 			path = macOSApp;
@@ -379,6 +374,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F6012345678901 /* iMote.icon in Resources */,
+				C0DE6379PRIVACYIOS0002 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -387,6 +383,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F6012345678902 /* iMote.icon in Resources */,
+				C0DE6379PRIVACYMAC0002 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -404,7 +401,6 @@
 				3413DD8F2F7F15D50086D1D8 /* H264FrameEncoder.swift in Sources */,
 				52A766052B849140BB2B6021 /* MacAppState.swift in Sources */,
 				3413DD812F7F058C0086D1D8 /* MacScreenCaptureProvider.swift in Sources */,
-				3413DDA12F81A0000086D1D8 /* VirtualDisplayManager.swift in Sources */,
 				BAB45B3ADCC83FC094122A83 /* MacWebSocketServer.swift in Sources */,
 				3413DD992F80E1890086D1D8 /* AACAudioEncoder.swift in Sources */,
 				C0DE6379HOSTENDPTCAT002 /* HostEndpointCatalog.swift in Sources */,

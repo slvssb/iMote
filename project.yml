@@ -19,6 +19,10 @@ targets:
     sources:
       - path: Shared
       - path: iOSApp
+        excludes:
+          - PrivacyInfo.xcprivacy
+      - path: iOSApp/PrivacyInfo.xcprivacy
+        buildPhase: resources
     info:
       path: iOSApp/Info.plist
       properties:
@@ -43,6 +47,10 @@ targets:
     sources:
       - path: Shared
       - path: macOSApp
+        excludes:
+          - PrivacyInfo.xcprivacy
+      - path: macOSApp/PrivacyInfo.xcprivacy
+        buildPhase: resources
     info:
       path: macOSApp/Info.plist
       properties:

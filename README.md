@@ -182,7 +182,8 @@ Notes for CLI mode:
 - The app does not include a cloud relay/backend in the current architecture.
 - Trusted device ids, display names, and peer signing-key pins are stored locally on the host. Forget, Remove, and Clear delete the pin with the id.
 - Each app's own signing private key is in the keychain with this-device-only protection. It is not kept in preferences, and an older preferences value is not copied in.
-- Screen preview requires macOS Screen Recording permission. Input injection requires Accessibility. Mic and Both also require the microphone, which the host asks for with a usage string.
+- Screen preview requires macOS Screen Recording permission and a real display. The host captures that display with ScreenCaptureKit. It does not create a virtual display. Input injection requires Accessibility. Mic and Both also require the microphone, which the host asks for with a usage string.
+- Each app ships a privacy manifest for its UserDefaults access. The host is not sandboxed: keyboard and pointer injection uses Accessibility, which the App Store sandbox does not allow. Cleartext `ws://` stays enabled so a Tailscale hostname can connect.
 
 ## Legal and Safety
 

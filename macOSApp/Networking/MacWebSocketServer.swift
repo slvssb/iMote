@@ -54,7 +54,6 @@ final class MacWebSocketServer: @unchecked Sendable {
     private let screenCaptureProvider = MacScreenCaptureProvider()
     private let h264Encoder = H264FrameEncoder()
     private let aacEncoder = AACAudioEncoder()
-    private let virtualDisplayManager = VirtualDisplayManager()
     private let queue = DispatchQueue(label: "remote.keyboard.mac.ws")
     private static let queueSpecificKey = DispatchSpecificKey<UInt8>()
     private var thermalObserver: NSObjectProtocol?
@@ -99,6 +98,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var recoveryBurstGeneration: UInt64 = 0
     private var lastPublishedCaptureRouteLabel: String = "Unknown"
     private var lastPublishedCaptureActive: Bool?
+    private var didReportMissingDisplay = false
 
     private enum BinaryPacketMarker {
         static let encryptedMedia: UInt8 = 0x7E
@@ -332,7 +332,7 @@ final class MacWebSocketServer: @unchecked Sendable {
 
         listener = wsListener
         wsListener.start(queue: queue)
-        applyVirtualDisplayIfNeeded()
+        reportPhysicalDisplays()
         startFrameBroadcasting()
     }
 
@@ -350,7 +350,6 @@ final class MacWebSocketServer: @unchecked Sendable {
         suspendCaptureBecauseNoPhonesRemain()
         h264Encoder.stop()
         aacEncoder.stop()
-        virtualDisplayManager.tearDown()
         publishClients()
     }
 
@@ -1168,8 +1167,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             self.queue.async { [weak self] in
                 guard let self else { return }
                 self.isFrameCaptureInFlight = false
-                let effectiveRouteLabel = self.virtualDisplayManager.isActive ? "Virtual" : captureRouteLabel
-                self.publishCaptureRouteIfNeeded(effectiveRouteLabel)
+                self.publishCaptureRouteIfNeeded(captureRouteLabel)
 
                 if let cursorPosition {
                     let cursorMessage = RemoteMessage.cursorPosition(
@@ -1223,7 +1221,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         Task { [weak self] in
             await self?.screenCaptureProvider.setPreferFallbackDisplay(false)
         }
-        applyVirtualDisplayIfNeeded()
+        reportPhysicalDisplays()
         publishCaptureActivityIfNeeded()
         scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after wake")
     }
@@ -1250,7 +1248,7 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private func handleScreenParametersDidChange() {
         guard isSystemSleeping == false else { return }
-        applyVirtualDisplayIfNeeded()
+        reportPhysicalDisplays()
         scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display reconfiguration")
     }
 
@@ -1360,22 +1358,16 @@ final class MacWebSocketServer: @unchecked Sendable {
         return Int(count)
     }
 
-    private func applyVirtualDisplayIfNeeded() {
-        guard let event = virtualDisplayManager.ensureDisplayAvailable() else { return }
-        switch event {
-        case .created:
-            let displayID = virtualDisplayManager.virtualDisplayID.map { String($0) } ?? "?"
+    private func reportPhysicalDisplays() {
+        let count = currentHostDisplayCount()
+        if count == 0 {
+            guard didReportMissingDisplay == false else { return }
+            didReportMissingDisplay = true
             Task { @MainActor in
-                self.onStateChange?("Virtual display created (2560×1600) — headless mode [ID \(displayID)]")
+                self.onStateChange?("No display is available for capture")
             }
-        case .creationFailed:
-            Task { @MainActor in
-                self.onStateChange?("Virtual display creation failed — headless capture unavailable")
-            }
-        case .tornDown:
-            Task { @MainActor in
-                self.onStateChange?("Virtual display removed — physical display detected")
-            }
+        } else {
+            didReportMissingDisplay = false
         }
     }
 
