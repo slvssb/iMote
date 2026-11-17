@@ -503,6 +503,14 @@ final class IOSKeyboardViewModel: ObservableObject {
         }
     }
 
+    func notePreviewDidNotStart() {
+        guard screenPreview.hasFrame == false else { return }
+        screenPreview.noteCaptureDidNotStart()
+        if lastError == nil {
+            lastError = "Screen preview did not start. Keyboard and trackpad are ready. Check Screen Recording on the Mac."
+        }
+    }
+
     func requestStreamResync() {
         guard isPaired else { return }
         client.sendStreamResync()

@@ -999,7 +999,12 @@ private struct MacCenteredLogoOverlay: View {
             }
 
             let minimumEnd = ContinuousClock.now + .seconds(2)
+            let previewTimeout = ContinuousClock.now + .seconds(6)
             while viewModel.screenPreview.hasFrame == false {
+                if ContinuousClock.now >= previewTimeout {
+                    viewModel.notePreviewDidNotStart()
+                    break
+                }
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 guard Task.isCancelled == false else { return }
             }
