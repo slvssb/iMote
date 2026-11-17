@@ -127,7 +127,7 @@ Bonjour stays on the LAN. To connect from another network, both devices join a t
 
 1. Install Tailscale on the Mac and the iPhone and sign both into the same tailnet.
 2. Run iMote Host. Under Reachable, copy the Tailscale name (for example `macbook.tailnet.ts.net:8989`) or the `100.x` address. The local name and LAN address stay in that list for same-Wi-Fi use.
-3. On the iPhone, choose Remote, paste the host, and leave the port at `8989` unless you changed it. A pasted `host:port` is accepted. Enter the pairing code and tap Connect.
+3. On the iPhone, choose Remote, paste the host, and leave the port at `8989` unless you changed it in the iMote Host window. A pasted `host:port` is accepted. Enter the pairing code and tap Connect.
 4. The host is saved on the iPhone. Next time, pick it under Saved hosts. A Mac whose signing key you have already verified can be opened again without a new code. That trust belongs to that Mac, and Forget is what clears it.
 5. Local discovery still finds the Mac when the iPhone is on its Wi-Fi.
 
@@ -145,8 +145,8 @@ You can run the mac host directly from terminal:
 
 CLI flags:
 
-- `--cli`: run listener headlessly in terminal
-- `--port <number>`: custom listener port (default `8989`)
+- `--cli`: run listener headlessly in terminal. This uses the same listener and pairing code as the host window.
+- `--port <number>`: listener port from 1 to 65535 (default `8989`, or the port last set in the window). If the flag is present and the value is not a port, the host exits instead of listening on 8989.
 - `--help`: print CLI usage
 
 In CLI mode the host prints:
@@ -165,7 +165,7 @@ Notes for CLI mode:
 
 ## Notes
 
-- Host listens on port `8989` on all interfaces, including Tailscale's interface when Tailscale is running, and advertises `_rkbd._tcp` on the local network only.
+- Host listens on port `8989` by default, on all interfaces, including Tailscale's interface when Tailscale is running, and advertises `_rkbd._tcp` on the local network only. Change the port in the iMote Host window, or pass `--port`.
 - Shortcuts and capitals follow the Mac's current keyboard layout. Named keys such as Return and the arrows stay on fixed virtual keycodes.
 - Protocol version is 2. Update the iPhone and the Mac together. An older build stops with an update message instead of pairing.
 - iOS background execution is limited by platform policy.
