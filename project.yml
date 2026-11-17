@@ -21,6 +21,14 @@ targets:
       - path: iOSApp
         excludes:
           - PrivacyInfo.xcprivacy
+          - UI/PhoneDevicesView.swift
+          - UI/PhonePreviewViews.swift
+          - UI/PhoneRemoteView.swift
+          - UI/PhoneSettingsView.swift
+      - path: iOSApp/UI/PhoneDevicesView.swift
+      - path: iOSApp/UI/PhonePreviewViews.swift
+      - path: iOSApp/UI/PhoneRemoteView.swift
+      - path: iOSApp/UI/PhoneSettingsView.swift
       - path: iOSApp/PrivacyInfo.xcprivacy
         buildPhase: resources
     info:
@@ -50,6 +58,12 @@ targets:
         excludes:
           - PrivacyInfo.xcprivacy
           - iMote-Host.entitlements
+          - UI/HostDevicesView.swift
+          - UI/HostOverviewView.swift
+          - UI/HostSettingsView.swift
+      - path: macOSApp/UI/HostDevicesView.swift
+      - path: macOSApp/UI/HostOverviewView.swift
+      - path: macOSApp/UI/HostSettingsView.swift
       - path: macOSApp/PrivacyInfo.xcprivacy
         buildPhase: resources
     info:

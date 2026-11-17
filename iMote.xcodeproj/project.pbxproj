@@ -41,6 +41,13 @@
 		BAB45B3ADCC83FC094122A83 /* MacWebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8653253EC541A234D5C4AA /* MacWebSocketServer.swift */; };
 		BBA2DCA4C6A595D6E5C748AC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D748496989F8D3202C8011AD /* ContentView.swift */; };
 		EC0E9A83442F46E768DE86AE /* LiquidGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7FE07A98A15914F482BCFF /* LiquidGlass.swift */; };
+		A7E1B0010000000000000A02 /* PhoneDevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E1B0010000000000000A01 /* PhoneDevicesView.swift */; };
+		A7E1B0010000000000000A04 /* PhoneRemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E1B0010000000000000A03 /* PhoneRemoteView.swift */; };
+		A7E1B0010000000000000A06 /* PhoneSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E1B0010000000000000A05 /* PhoneSettingsView.swift */; };
+		A7E1B0010000000000000A08 /* PhonePreviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E1B0010000000000000A07 /* PhonePreviewViews.swift */; };
+		B7E1B0010000000000000B02 /* HostOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E1B0010000000000000B01 /* HostOverviewView.swift */; };
+		B7E1B0010000000000000B04 /* HostDevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E1B0010000000000000B03 /* HostDevicesView.swift */; };
+		B7E1B0010000000000000B06 /* HostSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E1B0010000000000000B05 /* HostSettingsView.swift */; };
 		F36EB551B89A95635967EEF4 /* KeyboardKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48B64DEDE8DA2202F1905FB6 /* KeyboardKey.swift */; };
 		F87C5BA31D4641564A3AA785 /* RemoteKeyboardProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */; };
 		06C39E4D1F2B4C809D5E3F72 /* CaptureDisplaySelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A17C2B9D0F4A6E8B3C1D50 /* CaptureDisplaySelection.swift */; };
@@ -57,6 +64,13 @@
 		157FB361B8274C2A96AC5742 /* PairingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingManager.swift; sourceTree = "<group>"; };
 		19235F060002223B9FF83C41 /* HiddenTextInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HiddenTextInputView.swift; sourceTree = "<group>"; };
 		2D7FE07A98A15914F482BCFF /* LiquidGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiquidGlass.swift; sourceTree = "<group>"; };
+		A7E1B0010000000000000A01 /* PhoneDevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneDevicesView.swift; sourceTree = "<group>"; };
+		A7E1B0010000000000000A03 /* PhoneRemoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRemoteView.swift; sourceTree = "<group>"; };
+		A7E1B0010000000000000A05 /* PhoneSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneSettingsView.swift; sourceTree = "<group>"; };
+		A7E1B0010000000000000A07 /* PhonePreviewViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePreviewViews.swift; sourceTree = "<group>"; };
+		B7E1B0010000000000000B01 /* HostOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostOverviewView.swift; sourceTree = "<group>"; };
+		B7E1B0010000000000000B03 /* HostDevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostDevicesView.swift; sourceTree = "<group>"; };
+		B7E1B0010000000000000B05 /* HostSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSettingsView.swift; sourceTree = "<group>"; };
 		3413DD7D2F7F041C0086D1D8 /* TrackpadSurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadSurfaceView.swift; sourceTree = "<group>"; };
 		3413DD802F7F058C0086D1D8 /* MacScreenCaptureProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacScreenCaptureProvider.swift; sourceTree = "<group>"; };
 		3413DDA02F81A0000086D1D8 /* VirtualDisplayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualDisplayManager.swift; sourceTree = "<group>"; };
@@ -178,6 +192,10 @@
 			isa = PBXGroup;
 			children = (
 				2D7FE07A98A15914F482BCFF /* LiquidGlass.swift */,
+				A7E1B0010000000000000A01 /* PhoneDevicesView.swift */,
+				A7E1B0010000000000000A07 /* PhonePreviewViews.swift */,
+				A7E1B0010000000000000A03 /* PhoneRemoteView.swift */,
+				A7E1B0010000000000000A05 /* PhoneSettingsView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -257,7 +275,10 @@
 		C3ED65C905D65FA89562435A /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				B7E1B0010000000000000B03 /* HostDevicesView.swift */,
 				C0DE6379HOSTMAINWINDOW01 /* HostMainWindow.swift */,
+				B7E1B0010000000000000B01 /* HostOverviewView.swift */,
+				B7E1B0010000000000000B05 /* HostSettingsView.swift */,
 				DD75AE3DD9183B8564B32359 /* MenuBarMenuView.swift */,
 			);
 			path = UI;
@@ -423,6 +444,9 @@
 				3413DD992F80E1890086D1D8 /* AACAudioEncoder.swift in Sources */,
 				C0DE6379HOSTENDPTCAT002 /* HostEndpointCatalog.swift in Sources */,
 				C0DE6379HOSTMAINWINDOW02 /* HostMainWindow.swift in Sources */,
+				B7E1B0010000000000000B02 /* HostOverviewView.swift in Sources */,
+				B7E1B0010000000000000B04 /* HostDevicesView.swift in Sources */,
+				B7E1B0010000000000000B06 /* HostSettingsView.swift in Sources */,
 				46D6A68727A71EEA2AD55B25 /* MenuBarMenuView.swift in Sources */,
 				7B495C10B03F7C21BC7B604F /* PairingManager.swift in Sources */,
 				445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */,
@@ -450,6 +474,10 @@
 				3261C6035CBC1C82644C0DF8 /* IOSWebSocketClient.swift in Sources */,
 				185671B290F060D34E4FD573 /* KeyboardKey.swift in Sources */,
 				EC0E9A83442F46E768DE86AE /* LiquidGlass.swift in Sources */,
+				A7E1B0010000000000000A02 /* PhoneDevicesView.swift in Sources */,
+				A7E1B0010000000000000A04 /* PhoneRemoteView.swift in Sources */,
+				A7E1B0010000000000000A06 /* PhoneSettingsView.swift in Sources */,
+				A7E1B0010000000000000A08 /* PhonePreviewViews.swift in Sources */,
 				3B321DF188E6DA67E424EA2C /* RemoteKeyboardProtocol.swift in Sources */,
 				B8D42FA15C3E4072B1F9D6E3 /* CaptureDisplaySelection.swift in Sources */,
 				A1F1A1F1A1F1A1F1A1F10002 /* IdentityFingerprint.swift in Sources */,

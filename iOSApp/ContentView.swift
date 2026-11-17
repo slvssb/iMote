@@ -1,190 +1,7 @@
 import SwiftUI
-import AVFoundation
 import UIKit
 
 struct ContentView: View {
-    private enum Layout {
-        static let sectionSpacing: CGFloat = 16
-        static let panelSpacing: CGFloat = 14
-        static let contentPadding: CGFloat = 18
-        static let verticalPadding: CGFloat = 16
-        static let contentMaxWidth: CGFloat = 620
-        static let controlSpacing: CGFloat = 10
-        static let fieldCornerRadius: CGFloat = 12
-        static let groupSpacing: CGFloat = 12
-        static let rowSpacing: CGFloat = 8
-        static let fieldHorizontalPadding: CGFloat = 12
-        static let fieldVerticalPadding: CGFloat = 10
-        static let statusSpacing: CGFloat = 4
-        static let touchpadHeight: CGFloat = 210
-        static let mouseMotionMultiplier: Double = 1.45
-        static let scrollMultiplier: Double = 1.2
-        static let previewCornerRadius: CGFloat = 18
-        static let previewTopGlowHeight: CGFloat = 160
-        static let previewHorizontalInset: CGFloat = 4
-    }
-
-private struct FixedScreenPreview: View {
-    @ObservedObject var preview: ScreenPreviewState
-    let zoomScale: CGFloat
-    let isAutoFollowEnabled: Bool
-    let isVirtualOverscanEnabled: Bool
-    let videoGravity: AVLayerVideoGravity
-    let showsBlackBackdrop: Bool
-
-    var body: some View {
-        GeometryReader { proxy in
-            let safeZoom = max(zoomScale, 1)
-            let overscanX = (isAutoFollowEnabled && isVirtualOverscanEnabled) ? proxy.size.width / (4 * safeZoom) : 0
-            let overscanY = (isAutoFollowEnabled && isVirtualOverscanEnabled) ? proxy.size.height / (4 * safeZoom) : 0
-
-            ZStack(alignment: .bottomLeading) {
-                if showsBlackBackdrop {
-                    Rectangle()
-                        .fill(.black.opacity(0.8))
-                }
-
-                SampleBufferPreviewView(bridge: preview.displayBridge, videoGravity: videoGravity)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // Virtual overscan lets edge content move closer to center at high zoom.
-                    .padding(.horizontal, overscanX)
-                    .padding(.vertical, overscanY)
-                    .scaleEffect(
-                        isAutoFollowEnabled ? zoomScale : 1,
-                        anchor: isAutoFollowEnabled ? preview.followAnchor : .center
-                    )
-                    .clipped()
-
-                if preview.hasFrame == false && showsBlackBackdrop {
-                    Color.black.opacity(0.9)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct SampleBufferPreviewView: UIViewRepresentable {
-    let bridge: SampleBufferDisplayBridge
-    let videoGravity: AVLayerVideoGravity
-
-    func makeUIView(context: Context) -> SampleBufferDisplayLayerView {
-        let view = SampleBufferDisplayLayerView()
-        view.sampleBufferLayer.videoGravity = videoGravity
-        bridge.attach(layer: view.sampleBufferLayer)
-        return view
-    }
-
-    func updateUIView(_ uiView: SampleBufferDisplayLayerView, context: Context) {
-        uiView.sampleBufferLayer.videoGravity = videoGravity
-        bridge.attach(layer: uiView.sampleBufferLayer)
-    }
-}
-
-private final class SampleBufferDisplayLayerView: UIView {
-    override class var layerClass: AnyClass {
-        AVSampleBufferDisplayLayer.self
-    }
-
-    var sampleBufferLayer: AVSampleBufferDisplayLayer {
-        guard let layer = self.layer as? AVSampleBufferDisplayLayer else {
-            fatalError("Expected AVSampleBufferDisplayLayer backing layer")
-        }
-        return layer
-    }
-}
-
-private struct PreviewStatsStripView: View {
-    @ObservedObject var preview: ScreenPreviewState
-    let onSettingsTapped: () -> Void
-
-    var body: some View {
-        ZStack {
-            HStack {
-                Spacer(minLength: 0)
-                VStack(spacing: 2) {
-                    Text(preview.statsLabel)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(preview.hostCaptureStatusLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-                Spacer(minLength: 0)
-            }
-
-            HStack {
-                Spacer(minLength: 0)
-                Button(action: onSettingsTapped) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.headline.weight(.semibold))
-                        .frame(width: 44, height: 32, alignment: .trailing)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, 14)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 8)
-    }
-}
-
-private struct MacStartupOverlay: View {
-    let progress: Double
-    var progressOpacity: Double = 1
-
-    var body: some View {
-        ZStack {
-            Color.black
-
-            VStack(spacing: 20) {
-                Image(systemName: "applelogo")
-                    .font(.system(size: 38, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.95))
-
-                ZStack(alignment: .leading) {
-                    Capsule(style: .continuous)
-                        .fill(Color.white.opacity(0.16))
-                        .frame(width: 148, height: 4)
-
-                    Capsule(style: .continuous)
-                        .fill(Color.white.opacity(0.9))
-                        .frame(width: 148 * progress, height: 4)
-                }
-                .opacity(progressOpacity)
-            }
-        }
-        .allowsHitTesting(false)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-private struct MacCenteredLogoOverlay: View {
-    var body: some View {
-        ZStack {
-            Color.black
-            Image(systemName: "applelogo")
-                .font(.system(size: 38, weight: .regular))
-                .foregroundStyle(.white.opacity(0.95))
-        }
-        .allowsHitTesting(false)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-    private enum Field: Hashable {
-        case pairingCode
-    }
-
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
 
     @ObservedObject var viewModel: IOSKeyboardViewModel
@@ -196,7 +13,6 @@ private struct MacCenteredLogoOverlay: View {
     @AppStorage("input.eye.cursor.enabled") private var isEyeCursorEnabled = false
     @AppStorage("feature.eye.cursor.experimental.enabled") private var isEyeCursorExperimentalEnabled = false
     @State private var isTypingCaptureActive = false
-    @State private var isZoomSliderEditing = false
     @State private var isConfigSheetPresented = false
     @State private var isStartupOverlayVisible = false
     @State private var isStartupProgressVisible = false
@@ -222,240 +38,85 @@ private struct MacCenteredLogoOverlay: View {
     @State private var lastPreviewResyncAt: Date?
     @State private var previewSurfaceVersion = 0
     @State private var lastOrientationResyncAt: Date?
+    @State private var selectedTab: PhoneTab = .devices
     @StateObject private var eyeCursorController = EyeCursorController()
-    @FocusState private var focusedField: Field?
+    @FocusState private var focusedField: PhoneFocusField?
+
+    private var hidesTabBarForImmersiveRemote: Bool {
+        selectedTab == .remote
+            && isImmersiveLandscapeModeEnabled
+            && (showConnectedLayout || isDisconnectTransitionActive)
+    }
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: backgroundGradientColors,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                if showConnectedLayout || isDisconnectTransitionActive {
-                    GeometryReader { geometry in
-                        let topInset = resolvedTopInset(geometrySafeAreaTop: geometry.safeAreaInsets.top)
-                        let previewAspectSource = lockedDisconnectPreviewAspectRatio ?? viewModel.screenPreview.sourceAspectRatio
-                        let previewAspect = max(previewAspectSource, 0.01)
-                        let previewWidth = max(geometry.size.width - (Layout.previewHorizontalInset * 2), 1)
-                        let previewHeight = previewWidth / previewAspect
-
-                        if isImmersiveLandscapeModeEnabled {
-                            ZStack {
-                                ZStack {
-                                    fixedScreenPreview
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                        .opacity(isLivePreviewVisible ? 1 : 0)
-
-                                    TrackpadSurfaceView(
-                                        mouseScale: Layout.mouseMotionMultiplier,
-                                        scrollScale: Layout.scrollMultiplier,
-                                        isNaturalScrollingEnabled: false,
-                                        onMove: { deltaX, deltaY in
-                                            viewModel.moveMouse(deltaX: deltaX, deltaY: deltaY)
-                                        },
-                                        onScroll: { deltaX, deltaY in
-                                            viewModel.scrollMouse(deltaX: deltaX, deltaY: deltaY)
-                                        },
-                                        onClick: { button, action in
-                                            guard isTypingCaptureActive == false else { return }
-                                            viewModel.clickMouse(button: button, action: action)
-                                        },
-                                        onFourFingerSwipe: { direction in
-                                            switch direction {
-                                            case .up:
-                                                viewModel.sendNamedKey(.upArrow, modifiers: [.control])
-                                            case .down:
-                                                viewModel.sendNamedKey(.downArrow, modifiers: [.control])
-                                            case .left:
-                                                viewModel.sendNamedKey(.leftArrow, modifiers: [.control])
-                                            case .right:
-                                                viewModel.sendNamedKey(.rightArrow, modifiers: [.control])
-                                            }
-                                        },
-                                        isVisualChromeEnabled: false
-                                    )
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                                    if isStartupOverlayVisible {
-                                        MacStartupOverlay(
-                                            progress: startupProgress,
-                                            progressOpacity: isStartupProgressVisible ? 1 : 0
-                                        )
-                                    }
-
-                                    if isDisconnectPreviewOverlayVisible {
-                                        MacCenteredLogoOverlay()
-                                            .opacity(disconnectPreviewOverlayOpacity)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .padding(.vertical, 10)
-
-                                HiddenTextInputView(
-                                    isActive: isTypingCaptureActive,
-                                    activeModifiers: viewModel.activeModifiers,
-                                    onCharacter: { character in
-                                        viewModel.handleCharacter(character)
-                                    },
-                                    onBackspace: {
-                                        viewModel.handleBackspace()
-                                    },
-                                    onReturn: {
-                                        viewModel.handleReturn()
-                                    },
-                                    onModifierTap: { modifier in
-                                        viewModel.sendModifierTap(modifier)
-                                    },
-                                    onToggleModifier: { modifier in
-                                        viewModel.toggleModifier(modifier)
-                                    },
-                                    onSpecialKey: { key in
-                                        viewModel.sendNamedKey(key)
-                                    }
-                                )
-                                .frame(width: 1, height: 1)
-                                .opacity(0.01)
-                                .allowsHitTesting(false)
-
-                                VStack {
-                                    HStack {
-                                        Spacer(minLength: 0)
-                                        Button {
-                                            focusedField = nil
-                                            dismissTypingCapture()
-                                            isConfigSheetPresented = true
-                                        } label: {
-                                            Image(systemName: "slider.horizontal.3")
-                                                .font(.headline.weight(.semibold))
-                                                .frame(width: 42, height: 42)
-                                                .background(.ultraThinMaterial, in: Circle())
-                                        }
-                                        .buttonStyle(.plain)
-                                        .padding(.top, topInset + 8)
-                                        .padding(.trailing, 12)
-                                    }
-
-                                    Spacer(minLength: 0)
-
-                                    HStack {
-                                        Spacer(minLength: 0)
-                                        Button {
-                                            focusedField = nil
-                                            isTypingCaptureActive = true
-                                        } label: {
-                                            Image(systemName: "keyboard")
-                                                .font(.headline.weight(.semibold))
-                                                .frame(width: 50, height: 50)
-                                                .background(.ultraThinMaterial, in: Circle())
-                                        }
-                                        .buttonStyle(.plain)
-                                        .padding(.trailing, 14)
-                                        .padding(.bottom, max(geometry.safeAreaInsets.bottom, 12))
-                                    }
-                                }
-                            }
-                            .simultaneousGesture(
-                                TapGesture().onEnded {
-                                    if isTypingCaptureActive {
-                                        dismissTypingCapture()
-                                    }
-                                }
-                            )
-                            .opacity(isConnectedContentVisible ? connectedScreenOpacity : 0)
-                            .allowsHitTesting(isConnectedContentVisible && connectedScreenOpacity > 0.01)
-                        } else {
-                            VStack(spacing: 0) {
-                                Color.clear
-                                    .frame(height: topInset)
-                                    .opacity(isPreviewSectionVisible ? 1 : 0)
-                                    .animation(.easeInOut(duration: 0.35), value: isPreviewSectionVisible)
-
-                                ZStack {
-                                    if isLivePreviewVisible == false || isStartupOverlayVisible || isDisconnectPreviewOverlayVisible {
-                                        Color.black
-                                    }
-
-                                    fixedScreenPreview
-                                        .opacity(isLivePreviewVisible ? 1 : 0)
-
-                                    if isStartupOverlayVisible {
-                                        MacStartupOverlay(
-                                            progress: startupProgress,
-                                            progressOpacity: isStartupProgressVisible ? 1 : 0
-                                        )
-                                    }
-
-                                    if isDisconnectPreviewOverlayVisible {
-                                        MacCenteredLogoOverlay()
-                                            .opacity(disconnectPreviewOverlayOpacity)
-                                    }
-                                }
-                                    .opacity(isPreviewSectionVisible ? 1 : 0)
-                                    .animation(.easeInOut(duration: 0.35), value: isPreviewSectionVisible)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                    .frame(height: previewHeight)
-                                    .padding(.horizontal, Layout.previewHorizontalInset)
-                                    .allowsHitTesting(isPreviewSectionVisible)
-
-                                previewStatsStrip
-                                    .padding(.top, 10)
-                                    .padding(.bottom, 10)
-                                    .opacity(isStatsSectionVisible ? 1 : 0)
-                                    .animation(.easeInOut(duration: 0.35), value: isStatsSectionVisible)
-                                    .allowsHitTesting(isStatsSectionVisible)
-
-                                inputPanel
-                                    .frame(maxWidth: Layout.contentMaxWidth, alignment: .top)
-                                    .frame(maxWidth: .infinity, alignment: .top)
-                                    .opacity(isKeyboardSectionVisible ? 1 : 0)
-                                    .animation(.easeInOut(duration: 0.35), value: isKeyboardSectionVisible)
-                                    .allowsHitTesting(isKeyboardSectionVisible)
-                                    .padding(.top, Layout.sectionSpacing)
-                                    .padding(.horizontal, Layout.contentPadding)
-
-                                mousePanel
-                                    .frame(minHeight: Layout.touchpadHeight)
-                                    .frame(maxWidth: Layout.contentMaxWidth, maxHeight: .infinity, alignment: .top)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                                    .opacity(isTrackpadSectionVisible ? 1 : 0)
-                                    .animation(.easeInOut(duration: 0.35), value: isTrackpadSectionVisible)
-                                    .allowsHitTesting(isTrackpadSectionVisible)
-                                    .padding(.top, Layout.sectionSpacing)
-                                .padding(.horizontal, Layout.contentPadding)
-                                .padding(.bottom, Layout.verticalPadding)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            .opacity(isConnectedContentVisible ? connectedScreenOpacity : 0)
-                            .allowsHitTesting(isConnectedContentVisible && connectedScreenOpacity > 0.01)
-                        }
-                    }
-                    .ignoresSafeArea()
-                } else {
-                    ScrollView {
-                        VStack(spacing: Layout.sectionSpacing) {
-                            if viewModel.shouldShowPermissionGate {
-                                permissionGatePanel
-                            } else {
-                                connectionPanel
-                            }
-                        }
-                        .frame(maxWidth: Layout.contentMaxWidth)
-                        .frame(maxWidth: .infinity, alignment: .top)
-                        .padding(.horizontal, Layout.contentPadding)
-                        .padding(.vertical, Layout.verticalPadding)
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .scrollDismissesKeyboard(.interactively)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .opacity(connectionScreenOpacity)
+        TabView(selection: $selectedTab) {
+            Tab("Devices", systemImage: "macbook", value: PhoneTab.devices) {
+                NavigationStack {
+                    PhoneDevicesView(
+                        viewModel: viewModel,
+                        focusedField: $focusedField,
+                        isTypingCaptureActive: $isTypingCaptureActive,
+                        showConnectedLayout: showConnectedLayout,
+                        isDisconnectTransitionActive: isDisconnectTransitionActive,
+                        onDisconnect: { beginControlledDisconnectSequence(forgetDevice: false) },
+                        onForgetAndDisconnect: { beginControlledDisconnectSequence(forgetDevice: true) },
+                        onOpenRemote: { selectedTab = .remote }
+                    )
+                    .navigationTitle("Devices")
+                    .navigationBarTitleDisplayMode(.large)
+                    .opacity((showConnectedLayout || isDisconnectTransitionActive) ? 1 : connectionScreenOpacity)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            Tab("Remote", systemImage: "rectangle.and.hand.point.up.left", value: PhoneTab.remote) {
+                NavigationStack {
+                    PhoneRemoteView(
+                        viewModel: viewModel,
+                        focusedField: $focusedField,
+                        isTypingCaptureActive: $isTypingCaptureActive,
+                        isConfigSheetPresented: $isConfigSheetPresented,
+                        previewZoomLevel: previewZoomLevel,
+                        isVirtualOverscanEnabled: isVirtualOverscanEnabled,
+                        isImmersiveLandscapeModeEnabled: isImmersiveLandscapeModeEnabled,
+                        showConnectedLayout: showConnectedLayout,
+                        isDisconnectTransitionActive: isDisconnectTransitionActive,
+                        lockedDisconnectPreviewAspectRatio: lockedDisconnectPreviewAspectRatio,
+                        isLivePreviewVisible: isLivePreviewVisible,
+                        isStartupOverlayVisible: isStartupOverlayVisible,
+                        isStartupProgressVisible: isStartupProgressVisible,
+                        startupProgress: startupProgress,
+                        isDisconnectPreviewOverlayVisible: isDisconnectPreviewOverlayVisible,
+                        disconnectPreviewOverlayOpacity: disconnectPreviewOverlayOpacity,
+                        isPreviewSectionVisible: isPreviewSectionVisible,
+                        isStatsSectionVisible: isStatsSectionVisible,
+                        isKeyboardSectionVisible: isKeyboardSectionVisible,
+                        isTrackpadSectionVisible: isTrackpadSectionVisible,
+                        connectedScreenOpacity: connectedScreenOpacity,
+                        previewSurfaceVersion: previewSurfaceVersion,
+                        dismissTypingCapture: { dismissTypingCapture() },
+                        onShowDevices: { selectedTab = .devices }
+                    )
+                    .navigationTitle("Remote")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar(showConnectedLayout || isDisconnectTransitionActive ? .hidden : .visible, for: .navigationBar)
+                }
+            }
+
+            Tab("Settings", systemImage: "gearshape", value: PhoneTab.settings) {
+                NavigationStack {
+                    PhoneSettingsView(
+                        viewModel: viewModel,
+                        showsSessionActions: showConnectedLayout,
+                        onDisconnect: { beginControlledDisconnectSequence(forgetDevice: false) },
+                        onForgetAndDisconnect: { beginControlledDisconnectSequence(forgetDevice: true) },
+                        dismissTypingCapture: { dismissTypingCapture() }
+                    )
+                    .navigationTitle("Settings")
+                    .navigationBarTitleDisplayMode(.large)
+                }
+            }
         }
+        .toolbar(hidesTabBarForImmersiveRemote ? .hidden : .visible, for: .tabBar)
         .onAppear {
             applyOrientationPolicy()
             previewZoomLevel = clampedZoom(previewZoomLevel)
@@ -540,402 +201,32 @@ private struct MacCenteredLogoOverlay: View {
             guard completed, viewModel.isPaired else { return }
             beginConnectSequence()
         }
+        .onChange(of: viewModel.shouldShowPermissionGate) { _, show in
+            if show {
+                selectedTab = .devices
+            }
+        }
         .sheet(isPresented: $isConfigSheetPresented) {
             NavigationStack {
-                ScrollView {
-                    VStack(spacing: Layout.sectionSpacing) {
-                        previewControlsPanel
-                        fingerprintCaption
-                        Button("Disconnect", role: .destructive) {
-                            beginControlledDisconnectSequence(forgetDevice: false)
-                            isConfigSheetPresented = false
-                        }
-                        .buttonStyle(LiquidGlassButtonStyle(tint: .red))
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 24)
-
-                        Button("Forget and Disconnect", role: .destructive) {
-                            beginControlledDisconnectSequence(forgetDevice: true)
-                            isConfigSheetPresented = false
-                        }
-                    }
-                    .padding(Layout.contentPadding)
-                }
+                PhoneSettingsView(
+                    viewModel: viewModel,
+                    showsSessionActions: true,
+                    onDisconnect: {
+                        beginControlledDisconnectSequence(forgetDevice: false)
+                        isConfigSheetPresented = false
+                    },
+                    onForgetAndDisconnect: {
+                        beginControlledDisconnectSequence(forgetDevice: true)
+                        isConfigSheetPresented = false
+                    },
+                    dismissTypingCapture: { dismissTypingCapture() }
+                )
                 .navigationTitle("App Settings")
                 .navigationBarTitleDisplayMode(.inline)
             }
             .presentationDetents([.medium, .large])
         }
         .ignoresSafeArea(.keyboard, edges: .all)
-    }
-
-    private var connectionPanel: some View {
-        VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
-            VStack(alignment: .center, spacing: 12) {
-                if let appIcon = primaryAppIconImage {
-                    Image(uiImage: appIcon)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 72, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                } else {
-                    Image(systemName: "iphone.gen3")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 72, height: 72)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-
-                Text("Control your Mac from your iPhone")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                Text("End-to-end encrypted")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .multilineTextAlignment(.center)
-
-            VStack(alignment: .leading, spacing: Layout.groupSpacing) {
-                VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                    Text("Connection Mode")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Picker("Connection Mode", selection: $viewModel.connectionTargetMode) {
-                        Text("Local").tag(IOSKeyboardViewModel.ConnectionTargetMode.localDiscovery)
-                        Text("Remote").tag(IOSKeyboardViewModel.ConnectionTargetMode.manualAddress)
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: viewModel.connectionTargetMode) { _, _ in
-                        viewModel.noteConnectionDraftChanged()
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                    VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                        Text("Mac Host")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        if viewModel.connectionTargetMode == .manualAddress {
-                            Text("Use the Tailscale name or 100.x address shown on the Mac. Saved hosts stay on this iPhone.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, viewModel.connectionTargetMode == .manualAddress ? 12 : 0)
-                    if viewModel.connectionTargetMode == .localDiscovery {
-                        fieldShell {
-                            Picker("Mac Host", selection: selectedServiceBinding) {
-                                ForEach(viewModel.services) { service in
-                                    Text("\(service.name) (\(service.host))")
-                                        .tag(Optional(service))
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .disabled(viewModel.services.isEmpty)
-                        }
-                        if viewModel.services.isEmpty {
-                            Text("No Mac discovered yet. Keep the macOS app open on the same Wi-Fi network.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                            if viewModel.savedHosts.isEmpty == false {
-                                Text("Saved Hosts")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                ForEach(viewModel.savedHosts) { saved in
-                                    fieldShell {
-                                        HStack(spacing: 10) {
-                                            Button {
-                                                viewModel.selectSavedHost(saved)
-                                            } label: {
-                                                VStack(alignment: .leading, spacing: 2) {
-                                                    Text(saved.host)
-                                                        .font(.footnote.weight(.semibold))
-                                                        .foregroundStyle(.primary)
-                                                        .lineLimit(1)
-                                                        .truncationMode(.middle)
-                                                    Text("Port \(saved.port)")
-                                                        .font(.caption2)
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                            }
-                                            .buttonStyle(.plain)
-                                            if viewModel.manualHost.caseInsensitiveCompare(saved.host) == .orderedSame,
-                                               viewModel.manualPortText == String(saved.port) {
-                                                Image(systemName: "checkmark")
-                                                    .font(.caption.weight(.semibold))
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            Button {
-                                                viewModel.forgetSavedHost(saved)
-                                            } label: {
-                                                Image(systemName: "minus.circle.fill")
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .accessibilityLabel("Remove \(saved.host)")
-                                        }
-                                    }
-                                }
-                            }
-                            Text("Tailscale name or IP")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            fieldShell {
-                                TextField("macbook.tailnet.ts.net", text: $viewModel.manualHost)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .keyboardType(.URL)
-                                    .onChange(of: viewModel.manualHost) { _, _ in
-                                        viewModel.noteConnectionDraftChanged()
-                                    }
-                            }
-                            Text("Port")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            fieldShell {
-                                TextField("8989", text: $viewModel.manualPortText)
-                                    .keyboardType(.numberPad)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .onChange(of: viewModel.manualPortText) { _, newValue in
-                                        let digitsOnly = newValue.filter(\.isNumber)
-                                        let trimmed = String(digitsOnly.prefix(5))
-                                        if viewModel.manualPortText != trimmed {
-                                            viewModel.manualPortText = trimmed
-                                        }
-                                        viewModel.noteConnectionDraftChanged()
-                                    }
-                            }
-                        }
-                    }
-                }
-
-                if viewModel.isTrustedAutoReconnect == false {
-                    VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                        Text("Pairing Code")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        fieldShell {
-                            TextField("123456", text: $viewModel.pairingCode)
-                                .focused($focusedField, equals: .pairingCode)
-                                .keyboardType(.numberPad)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .onChange(of: viewModel.pairingCode) { _, newValue in
-                                    let digitsOnly = newValue.filter(\.isNumber)
-                                    let trimmed = String(digitsOnly.prefix(6))
-                                    if viewModel.pairingCode != trimmed {
-                                        viewModel.pairingCode = trimmed
-                                    }
-                                }
-                                .onTapGesture {
-                                    isTypingCaptureActive = false
-                                }
-                                .font(.system(.body, design: .monospaced))
-                        }
-                    }
-                } else {
-                    HStack(spacing: 10) {
-                        Image(systemName: "checkmark.shield")
-                            .foregroundStyle(.green)
-                        Text("Trusted device detected. Pairing code is not required.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-
-                fingerprintCaption
-
-                if viewModel.hasTrustedSessionLocally {
-                    Button("Forget trusted Mac") {
-                        viewModel.forgetTrustedSessionOnPhone()
-                    }
-                    .font(.footnote.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-            }
-            .padding(.top, 64)
-
-            Button(connectButtonTitle) {
-                viewModel.connect()
-            }
-            .buttonStyle(LiquidGlassButtonStyle(tint: .blue))
-            .frame(maxWidth: .infinity)
-            .padding(.top, 8)
-            .disabled(canConnect == false)
-
-            if let error = viewModel.lastError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            } else if canConnect == false,
-                      shouldShowConnectDisabledReason {
-                Text(connectDisabledReason)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var fingerprintCaption: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("This iPhone \(viewModel.localSigningFingerprint)")
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-            if let macFingerprint = viewModel.pairedHostFingerprint {
-                Text("Mac \(macFingerprint)")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                if viewModel.pairedHostFingerprintIsNew {
-                    Text("First pair. Compare these fingerprints with the Mac before you type.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var permissionGatePanel: some View {
-        VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
-            VStack(alignment: .leading, spacing: Layout.rowSpacing) {
-                Text("Host Permissions")
-                    .font(.title3.weight(.semibold))
-                Text("Accessibility lets the iPhone type and move the pointer. Screen Recording is only needed for live preview.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if viewModel.permissionGatePhase == .checking {
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text("Checking permissions...")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, Layout.fieldHorizontalPadding)
-                .padding(.vertical, Layout.fieldVerticalPadding)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-            } else {
-                permissionRow(
-                    title: "Accessibility",
-                    granted: viewModel.hostPermissionState.accessibilityGranted
-                ) {
-                    viewModel.requestHostPermissionFix(.accessibility)
-                }
-
-                permissionRow(
-                    title: "Screen Recording",
-                    granted: viewModel.hostPermissionState.screenRecordingGranted
-                ) {
-                    viewModel.requestHostPermissionFix(.screenRecording)
-                }
-            }
-
-            if viewModel.hostPermissionState.allGranted == false {
-                Button("I've given access. Refresh status") {
-                    viewModel.refreshHostPermissionStatus()
-                }
-                .buttonStyle(LiquidGlassButtonStyle(tint: .gray))
-                .frame(maxWidth: .infinity)
-            }
-
-            if viewModel.canContinueAfterPermissionGate {
-                Button("Continue") {
-                    viewModel.completePermissionGate()
-                }
-                .buttonStyle(LiquidGlassButtonStyle(tint: .blue))
-                .frame(maxWidth: .infinity)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func permissionRow(
-        title: String,
-        granted: Bool,
-        onFixTapped: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-            Spacer(minLength: 0)
-            if granted {
-                Label("Granted", systemImage: "checkmark.circle.fill")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.green)
-            } else {
-                Button("Grant Access") {
-                    onFixTapped()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(.horizontal, Layout.fieldHorizontalPadding)
-        .padding(.vertical, Layout.fieldVerticalPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-    }
-
-    private var primaryAppIconImage: UIImage? {
-        guard
-            let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
-            let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
-            let iconFiles = primary["CFBundleIconFiles"] as? [String],
-            let iconName = iconFiles.last,
-            let image = UIImage(named: iconName)
-        else {
-            return nil
-        }
-        return image
-    }
-
-    private var fixedScreenPreview: some View {
-        FixedScreenPreview(
-            preview: viewModel.screenPreview,
-            zoomScale: CGFloat(previewZoomLevel),
-            isAutoFollowEnabled: previewZoomLevel > 1.0,
-            isVirtualOverscanEnabled: isVirtualOverscanEnabled,
-            videoGravity: isImmersiveLandscapeModeEnabled ? .resizeAspect : .resizeAspectFill,
-            showsBlackBackdrop: isImmersiveLandscapeModeEnabled == false
-        )
-        .id(previewSurfaceVersion)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                focusedField = nil
-                dismissTypingCapture()
-            }
-        )
-    }
-
-    private var isConnectedContentVisible: Bool {
-        showConnectedLayout
-            || isDisconnectTransitionActive
-            || isLivePreviewVisible
-            || isPreviewSectionVisible
-            || isStatsSectionVisible
-            || isKeyboardSectionVisible
-            || isTrackpadSectionVisible
-            || isStartupOverlayVisible
-            || isDisconnectPreviewOverlayVisible
     }
 
     private var shouldUseImmersiveLandscapeOrientation: Bool {
@@ -969,6 +260,7 @@ private struct MacCenteredLogoOverlay: View {
         isStatsSectionVisible = false
         isKeyboardSectionVisible = false
         isTrackpadSectionVisible = false
+        selectedTab = .remote
         startPreviewResyncMonitor()
 
         startupTask = Task { @MainActor in
@@ -1151,6 +443,9 @@ private struct MacCenteredLogoOverlay: View {
             withAnimation(.easeInOut(duration: 0.35)) {
                 connectionScreenOpacity = 1
             }
+            if selectedTab == .remote {
+                selectedTab = .devices
+            }
         }
     }
 
@@ -1250,384 +545,8 @@ private struct MacCenteredLogoOverlay: View {
         lastOrientationResyncAt = nil
     }
 
-    private var previewStatsStrip: some View {
-        VStack(spacing: 6) {
-            PreviewStatsStripView(preview: viewModel.screenPreview) {
-                focusedField = nil
-                dismissTypingCapture()
-                isConfigSheetPresented = true
-            }
-            if showConnectedLayout, let error = viewModel.lastError, error.isEmpty == false {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-                    .padding(.horizontal, 16)
-            }
-        }
-    }
-
-    private var previewControlsPanel: some View {
-        VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
-            VStack(alignment: .leading, spacing: 8) {
-                settingsTitle("Display", systemImage: "display")
-                Text(viewModel.screenPreview.hostCaptureStatusLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if viewModel.screenPreview.displays.count > 1 {
-                    Picker("Show display", selection: Binding(
-                        get: { viewModel.screenPreview.selectedDisplayID },
-                        set: { newValue in
-                            dismissTypingCapture()
-                            viewModel.selectHostDisplay(newValue)
-                        }
-                    )) {
-                        Text("Automatic").tag(UInt32(0))
-                        ForEach(viewModel.screenPreview.displays) { display in
-                            Text(display.menuTitle).tag(display.id)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .disabled(viewModel.isPaired == false)
-                }
-
-                Toggle(isOn: Binding(
-                    get: { viewModel.screenPreview.virtualDisplayWhenHeadless },
-                    set: { newValue in
-                        dismissTypingCapture()
-                        viewModel.setVirtualDisplayWhenHeadless(newValue)
-                    }
-                )) {
-                    Text("Virtual display when no monitor")
-                        .font(.footnote.weight(.semibold))
-                }
-                .disabled(viewModel.isPaired == false)
-
-                Text("Used when the Mac has no physical display online, so the preview and trackpad still have a screen.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Layout.fieldHorizontalPadding)
-            .padding(.vertical, Layout.fieldVerticalPadding)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    settingsTitle("Zoom level", systemImage: "plus.magnifyingglass")
-                    Text("\(previewZoomLevel, specifier: "%.1f")x")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Slider(
-                    value: Binding(
-                        get: { previewZoomLevel },
-                        set: { newValue in
-                            dismissTypingCapture()
-                            previewZoomLevel = clampedZoom(newValue)
-                        }
-                    ),
-                    in: 1.0...3.0,
-                    step: 0.5
-                ) {
-                    settingsTitle("Zoom level", systemImage: "plus.magnifyingglass")
-                } minimumValueLabel: {
-                    Text("1.0x")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } maximumValueLabel: {
-                    Text("3.0x")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } onEditingChanged: { editing in
-                    isZoomSliderEditing = editing
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Layout.fieldHorizontalPadding)
-            .padding(.vertical, Layout.fieldVerticalPadding)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-
-            HStack(spacing: 12) {
-                settingsTitle("Immersive landscape preview", systemImage: "rectangle.inset.filled.and.person.filled")
-                Spacer(minLength: 0)
-                Toggle("", isOn: $isImmersiveLandscapeModeEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-            }
-            .padding(.horizontal, Layout.fieldHorizontalPadding)
-            .padding(.vertical, Layout.fieldVerticalPadding)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-
-            HStack(spacing: 12) {
-                settingsTitle("Virtual overscan", systemImage: "viewfinder")
-                Spacer(minLength: 0)
-                Toggle("", isOn: $isVirtualOverscanEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-            }
-            .padding(.horizontal, Layout.fieldHorizontalPadding)
-            .padding(.vertical, Layout.fieldVerticalPadding)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-
-            HStack(spacing: 12) {
-                settingsTitle("Experimental", systemImage: "flask")
-                Spacer(minLength: 0)
-                Toggle("", isOn: $isEyeCursorExperimentalEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-            }
-            .padding(.horizontal, Layout.fieldHorizontalPadding)
-            .padding(.vertical, Layout.fieldVerticalPadding)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-
-            if isEyeCursorExperimentalEnabled {
-                HStack(spacing: 12) {
-                    settingsTitle("Eye cursor control", systemImage: "eye")
-                    Spacer(minLength: 0)
-                    Toggle("", isOn: $isEyeCursorEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-                .padding(.horizontal, Layout.fieldHorizontalPadding)
-                .padding(.vertical, Layout.fieldVerticalPadding)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-
-                Text("Experimental. Uses front camera to map eye movement to cursor.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, Layout.fieldHorizontalPadding)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                settingsTitle("Preview quality", systemImage: "dial.medium")
-
-                Picker("Preview Quality", selection: Binding(
-                    get: { viewModel.previewQualityMode },
-                    set: { newValue in
-                        dismissTypingCapture()
-                        previewQualityModeRaw = newValue.rawValue
-                        viewModel.setPreviewQualityMode(newValue)
-                    }
-                )) {
-                    Text("Balanced").tag(PreviewQualityMode.balanced)
-                    Text("Ultra").tag(PreviewQualityMode.ultra)
-                }
-                .pickerStyle(.segmented)
-                .disabled(viewModel.isThermalQualityOverrideActive)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Layout.fieldHorizontalPadding)
-            .padding(.vertical, Layout.fieldVerticalPadding)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 8) {
-                settingsTitle("Audio source", systemImage: "speaker.wave.2")
-
-                Picker("Audio Source", selection: Binding(
-                    get: { viewModel.audioCaptureSource },
-                    set: { newValue in
-                        dismissTypingCapture()
-                        audioCaptureSourceRaw = newValue.rawValue
-                        viewModel.setAudioCaptureSource(newValue)
-                    }
-                )) {
-                    Text("Off").tag(AudioCaptureSource.off)
-                    Text("System").tag(AudioCaptureSource.systemOutput)
-                    Text("Mic").tag(AudioCaptureSource.microphone)
-                    Text("Both").tag(AudioCaptureSource.systemAndMicrophone)
-                }
-                .pickerStyle(.segmented)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Layout.fieldHorizontalPadding)
-            .padding(.vertical, Layout.fieldVerticalPadding)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                focusedField = nil
-                dismissTypingCapture()
-            }
-        )
-    }
-
-    private func settingsTitle(_ text: String, systemImage: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tint)
-            Text(text)
-                .font(.footnote.weight(.semibold))
-        }
-    }
-
-    private var inputPanel: some View {
-        VStack(alignment: .leading, spacing: Layout.panelSpacing) {
-            panelHeader(
-                title: "Keyboard Stream",
-                badge: isTypingCaptureActive ? "Focused" : "Idle"
-            )
-
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(colorScheme == .dark ? Color(red: 0.13, green: 0.13, blue: 0.14) : Color(red: 0.16, green: 0.16, blue: 0.17))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.18), lineWidth: 0.8)
-                    }
-
-                HiddenTextInputView(
-                    isActive: isTypingCaptureActive,
-                    activeModifiers: viewModel.activeModifiers,
-                    onCharacter: { character in
-                        viewModel.handleCharacter(character)
-                    },
-                    onBackspace: {
-                        viewModel.handleBackspace()
-                    },
-                    onReturn: {
-                        viewModel.handleReturn()
-                    },
-                    onModifierTap: { modifier in
-                        viewModel.sendModifierTap(modifier)
-                    },
-                    onToggleModifier: { modifier in
-                        viewModel.toggleModifier(modifier)
-                    },
-                    onSpecialKey: { key in
-                        viewModel.sendNamedKey(key)
-                    }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-            }
-            .frame(height: 128)
-            .highPriorityGesture(
-                TapGesture().onEnded {
-                    focusedField = nil
-                    isTypingCaptureActive = true
-                }
-            )
-
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var mousePanel: some View {
-        VStack(alignment: .leading, spacing: Layout.panelSpacing) {
-            panelHeader(title: "Trackpad")
-
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(colorScheme == .dark ? Color(red: 0.22, green: 0.22, blue: 0.24) : Color(red: 0.74, green: 0.75, blue: 0.77))
-
-                TrackpadSurfaceView(
-                    mouseScale: Layout.mouseMotionMultiplier,
-                    scrollScale: Layout.scrollMultiplier,
-                    isNaturalScrollingEnabled: false,
-                    onMove: { deltaX, deltaY in
-                        viewModel.moveMouse(deltaX: deltaX, deltaY: deltaY)
-                    },
-                    onScroll: { deltaX, deltaY in
-                        viewModel.scrollMouse(deltaX: deltaX, deltaY: deltaY)
-                    },
-                    onClick: { button, action in
-                        viewModel.clickMouse(button: button, action: action)
-                    },
-                    onFourFingerSwipe: { direction in
-                        switch direction {
-                        case .up:
-                            viewModel.sendNamedKey(.upArrow, modifiers: [.control])
-                        case .down:
-                            viewModel.sendNamedKey(.downArrow, modifiers: [.control])
-                        case .left:
-                            viewModel.sendNamedKey(.leftArrow, modifiers: [.control])
-                        case .right:
-                            viewModel.sendNamedKey(.rightArrow, modifiers: [.control])
-                        }
-                    }
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.black.opacity(0.35), lineWidth: 1.2)
-                    .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 2)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            }
-            .frame(maxWidth: .infinity)
-            .frame(maxHeight: .infinity)
-            .frame(minHeight: 160)
-        }
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                focusedField = nil
-                dismissTypingCapture()
-            }
-        )
-    }
-
-    private func panelHeader(title: String, badge: String? = nil) -> some View {
-        HStack(alignment: .center) {
-            Text(title)
-                .font(.title3.weight(.semibold))
-            Spacer()
-            if let badge {
-                Text(badge)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(.thinMaterial, in: Capsule(style: .continuous))
-            }
-        }
-    }
-
-    private func fieldShell<Inner: View>(@ViewBuilder _ inner: () -> Inner) -> some View {
-        inner()
-            .padding(.horizontal, Layout.fieldHorizontalPadding)
-            .padding(.vertical, Layout.fieldVerticalPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
-    }
-
-    private var backgroundGradientColors: [Color] {
-        if colorScheme == .dark {
-            return [
-                Color(red: 0.08, green: 0.09, blue: 0.10),
-                Color(red: 0.11, green: 0.12, blue: 0.14),
-                Color(red: 0.06, green: 0.07, blue: 0.08)
-            ]
-        }
-
-        return [
-            Color(red: 0.90, green: 0.91, blue: 0.92),
-            Color(red: 0.84, green: 0.85, blue: 0.87),
-            Color(red: 0.78, green: 0.79, blue: 0.81)
-        ]
-    }
-
     private func clampedZoom(_ value: Double) -> Double {
         min(3.0, max(1.0, value))
-    }
-
-    private func resolvedTopInset(geometrySafeAreaTop: CGFloat) -> CGFloat {
-        let windowTopInset = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow }?
-            .safeAreaInsets.top ?? 0
-        return max(geometrySafeAreaTop, windowTopInset)
     }
 
     private func dismissTypingCapture() {
@@ -1642,62 +561,5 @@ private struct MacCenteredLogoOverlay: View {
         } else {
             eyeCursorController.stop()
         }
-    }
-
-    private var selectedServiceBinding: Binding<DiscoveredService?> {
-        Binding(
-            get: { viewModel.selectedService },
-            set: { viewModel.selectedService = $0 }
-        )
-    }
-
-    private var connectButtonTitle: String {
-        viewModel.isConnecting ? "Connecting…" : "Connect to Mac"
-    }
-
-    private var canConnect: Bool {
-        if viewModel.isConnecting {
-            return false
-        }
-        switch viewModel.connectionTargetMode {
-        case .localDiscovery:
-            guard viewModel.selectedService != nil else {
-                return false
-            }
-        case .manualAddress:
-            guard case .success = RemoteHostAddress.parse(hostField: viewModel.manualHost, portField: viewModel.manualPortText) else {
-                return false
-            }
-        }
-        if viewModel.isTrustedAutoReconnect {
-            return true
-        }
-        return viewModel.pairingCode.count == 6
-    }
-
-    private var connectDisabledReason: String {
-        if viewModel.isConnecting {
-            return "Connecting to your Mac..."
-        }
-        if viewModel.connectionTargetMode == .localDiscovery, viewModel.selectedService == nil {
-            return "Select a Mac host to continue."
-        }
-        if viewModel.connectionTargetMode == .manualAddress {
-            if case let .failure(failure) = RemoteHostAddress.parse(hostField: viewModel.manualHost, portField: viewModel.manualPortText) {
-                return failure.message
-            }
-        }
-        if viewModel.isTrustedAutoReconnect == false && viewModel.pairingCode.count != 6 {
-            return "Enter the 6-digit pairing code."
-        }
-        return ""
-    }
-
-    private var shouldShowConnectDisabledReason: Bool {
-        if viewModel.connectionTargetMode == .manualAddress,
-           connectDisabledReason == RemoteHostAddress.ParseFailure.missingHost.message {
-            return false
-        }
-        return connectDisabledReason.isEmpty == false
     }
 }
