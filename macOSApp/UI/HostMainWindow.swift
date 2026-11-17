@@ -291,7 +291,7 @@ private struct HostPermissionsSection: View {
         } header: {
             Text("Permissions")
         } footer: {
-            Text("macOS asks for these in System Settings. Remote control stays off until both are granted.")
+            Text("Keyboard and pointer need Accessibility. Live preview also needs Screen Recording.")
         }
     }
 }

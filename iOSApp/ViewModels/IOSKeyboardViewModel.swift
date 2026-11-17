@@ -99,7 +99,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     var canContinueAfterPermissionGate: Bool {
-        permissionGatePhase == .checklist && hostPermissionState.allGranted
+        permissionGatePhase == .checklist && hostPermissionState.accessibilityGranted
     }
 
     private let browser = BonjourServiceBrowser()
@@ -298,11 +298,11 @@ final class IOSKeyboardViewModel: ObservableObject {
                 screenRecordingGranted: screenRecordingGranted
             )
 
-            if self.hostPermissionState.allGranted {
+            if self.hostPermissionState.accessibilityGranted {
                 self.stopPermissionPolling()
                 self.permissionGatePhase = .checklist
 
-                // If host was already ready at first check, skip showing the permission gate.
+                // Accessibility is enough to type. Screen Recording is only required for preview.
                 if self.hasSeenMissingRequiredPermissions == false {
                     self.hasCompletedPermissionGate = true
                     self.permissionGatePhase = .idle
@@ -592,7 +592,7 @@ final class IOSKeyboardViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard let self else { return }
                 guard self.isPaired, self.hasCompletedPermissionGate == false else { return }
-                if self.hostPermissionState.allGranted {
+                if self.hostPermissionState.accessibilityGranted {
                     return
                 }
                 self.client.requestPermissionStatus()

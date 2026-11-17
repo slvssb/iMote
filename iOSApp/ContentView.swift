@@ -818,7 +818,7 @@ private struct MacCenteredLogoOverlay: View {
             VStack(alignment: .leading, spacing: Layout.rowSpacing) {
                 Text("Host Permissions")
                     .font(.title3.weight(.semibold))
-                Text("Checking whether your Mac host has the required permissions before remote control starts.")
+                Text("Keyboard and pointer need Accessibility on the Mac. Live preview also needs Screen Recording, and you can continue without it.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
