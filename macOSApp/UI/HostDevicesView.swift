@@ -26,7 +26,7 @@ struct HostConnectedDevicesSection: View {
                 ContentUnavailableView(
                     "No iPhone connected",
                     systemImage: "iphone.slash",
-                    description: { Text("No active client") }
+                    description: Text("No active client")
                 )
             } else {
                 ForEach(phones) { phone in
@@ -55,7 +55,7 @@ struct HostTrustedDevicesSection: View {
                 ContentUnavailableView(
                     "No trusted iPhones",
                     systemImage: "checkmark.shield",
-                    description: { Text("No trusted devices") }
+                    description: Text("No trusted devices")
                 )
             } else {
                 ForEach(devices) { device in

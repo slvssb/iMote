@@ -110,7 +110,7 @@ struct HostAddressesSection: View {
                 ContentUnavailableView(
                     isResolving ? "Looking up addresses" : "No reachable address",
                     systemImage: "network.slash",
-                    description: { Text(isResolving ? "Checking this Mac's LAN and Tailscale addresses." : "No reachable address yet.") }
+                    description: Text(isResolving ? "Checking this Mac's LAN and Tailscale addresses." : "No reachable address yet.")
                 )
             } else {
                 ForEach(endpoints) { endpoint in

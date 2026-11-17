@@ -131,7 +131,7 @@ struct PhoneDevicesView: View {
                 ContentUnavailableView(
                     "No Macs nearby",
                     systemImage: "wifi.slash",
-                    description: { Text("No Mac discovered yet. Keep the macOS app open on the same Wi-Fi network.") }
+                    description: Text("No Mac discovered yet. Keep the macOS app open on the same Wi-Fi network.")
                 )
             } else {
                 Picker("Mac Host", selection: selectedServiceBinding) {
@@ -319,7 +319,7 @@ struct PhoneDevicesView: View {
                 ContentUnavailableView(
                     "No trusted Macs",
                     systemImage: "checkmark.shield",
-                    description: { Text("After you pair, this iPhone remembers that Mac by its signing key.") }
+                    description: Text("After you pair, this iPhone remembers that Mac by its signing key.")
                 )
             } else {
                 ForEach(viewModel.trustedHostRecords) { record in
