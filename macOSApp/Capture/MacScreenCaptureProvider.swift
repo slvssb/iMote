@@ -117,12 +117,13 @@ actor MacScreenCaptureProvider {
         audioSampleHandler = handler
     }
 
-    func normalizedCursorPosition() -> CGPoint? {
-        guard displayFrame.isEmpty == false else { return nil }
+    func normalizedCursorPosition() async -> CGPoint? {
+        let frame = displayFrame
+        guard frame.isEmpty == false else { return nil }
 
-        let location = NSEvent.mouseLocation
-        let relativeX = (location.x - displayFrame.minX) / displayFrame.width
-        let relativeY = (location.y - displayFrame.minY) / displayFrame.height
+        let location = await MainActor.run { NSEvent.mouseLocation }
+        let relativeX = (location.x - frame.minX) / frame.width
+        let relativeY = (location.y - frame.minY) / frame.height
 
         let clampedX = min(max(relativeX, 0), 1)
         let clampedY = min(max(1 - relativeY, 0), 1)

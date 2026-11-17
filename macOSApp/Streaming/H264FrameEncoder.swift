@@ -8,6 +8,10 @@ private struct EncoderPixelBuffer: @unchecked Sendable {
     let value: CVPixelBuffer
 }
 
+private struct EncodedSampleBuffer: @unchecked Sendable {
+    let value: CMSampleBuffer
+}
+
 final class H264FrameEncoder: @unchecked Sendable {
     private static let targetFPS = 60
     private static let minAdaptiveScale = 0.45
@@ -319,7 +323,14 @@ final class H264FrameEncoder: @unchecked Sendable {
         return pixelBuffer
     }
 
-    fileprivate func handleEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    fileprivate func enqueueEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        let wrapped = EncodedSampleBuffer(value: sampleBuffer)
+        queue.async {
+            self.handleEncodedSampleBuffer(wrapped.value)
+        }
+    }
+
+    private func handleEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
         if (didSendConfig == false || pendingConfigEmission),
@@ -416,5 +427,5 @@ private let compressionOutputCallback: VTCompressionOutputCallback = { refCon, _
     }
 
     let encoder = Unmanaged<H264FrameEncoder>.fromOpaque(refCon).takeUnretainedValue()
-    encoder.handleEncodedSampleBuffer(sampleBuffer)
+    encoder.enqueueEncodedSampleBuffer(sampleBuffer)
 }

@@ -54,6 +54,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private let aacEncoder = AACAudioEncoder()
     private let virtualDisplayManager = VirtualDisplayManager()
     private let queue = DispatchQueue(label: "remote.keyboard.mac.ws")
+    private static let queueSpecificKey = DispatchSpecificKey<UInt8>()
     private var thermalObserver: NSObjectProtocol?
     private var workspaceSleepObserver: NSObjectProtocol?
     private var workspaceWakeObserver: NSObjectProtocol?
@@ -111,6 +112,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         self.pairingManager = pairingManager
         self.injector = injector
         self.accessibilityPermissionManager = accessibilityPermissionManager
+        queue.setSpecific(key: Self.queueSpecificKey, value: 1)
         let identity = SigningIdentityStore.loadOrCreate(
             account: "host-signing",
             legacyDefaultsKey: "remoteKeyboard.mac.signingPrivateKey"
@@ -254,6 +256,25 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     func start(port: UInt16 = 8989) throws {
+        try performOnQueue {
+            try self.startOnQueue(port: port)
+        }
+    }
+
+    func stop() {
+        performOnQueue {
+            self.stopOnQueue()
+        }
+    }
+
+    private func performOnQueue<T>(_ body: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: Self.queueSpecificKey) != nil {
+            return try body()
+        }
+        return try queue.sync(execute: body)
+    }
+
+    private func startOnQueue(port: UInt16) throws {
         listenerPort = port
         if listener != nil {
             return
@@ -310,23 +331,20 @@ final class MacWebSocketServer: @unchecked Sendable {
         startFrameBroadcasting()
     }
 
-    func stop() {
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.injector.releasePressedButtons()
-            self.clients.values.forEach { context in
-                context.connection.cancel()
-            }
-            self.clients.removeAll()
-            self.listener?.cancel()
-            self.listener = nil
-            self.stopFrameBroadcasting()
-            self.suspendCaptureBecauseNoPhonesRemain()
-            self.h264Encoder.stop()
-            self.aacEncoder.stop()
-            self.virtualDisplayManager.tearDown()
-            self.publishClients()
+    private func stopOnQueue() {
+        injector.releasePressedButtons()
+        clients.values.forEach { context in
+            context.connection.cancel()
         }
+        clients.removeAll()
+        listener?.cancel()
+        listener = nil
+        stopFrameBroadcasting()
+        suspendCaptureBecauseNoPhonesRemain()
+        h264Encoder.stop()
+        aacEncoder.stop()
+        virtualDisplayManager.tearDown()
+        publishClients()
     }
 
     private func accept(_ connection: NWConnection) {
