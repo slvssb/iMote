@@ -24,6 +24,7 @@ final class KeyboardInjector {
     private let permissionManager: AccessibilityPermissionManager
     private var cachedDisplayBounds: CGRect = .zero
     private var cachedDisplayBoundsTimestamp: CFAbsoluteTime = 0
+    private var pointerBoundsOverride: CGRect?
     private var lastMouseTapTime: CFAbsoluteTime = 0
     private var lastMouseTapLocation: CGPoint = .zero
     private var lastMouseTapButton: MouseButton?
@@ -88,7 +89,10 @@ final class KeyboardInjector {
             throw KeyboardInjectorError.eventBuildFailed
         }
 
-        let current = currentEvent.location
+        var current = currentEvent.location
+        if let bounds = pointerBoundsOverride, bounds.isEmpty == false, bounds.contains(current) == false {
+            current = clampedPoint(current, to: bounds)
+        }
         let adjustedDelta = adjustedEdgeAwareDelta(from: current, deltaX: deltaX, deltaY: deltaY)
         let rawNextPoint = CGPoint(x: current.x + adjustedDelta.x, y: current.y - adjustedDelta.y)
         let nextPoint = clampedPointToActiveDisplays(rawNextPoint)
@@ -542,19 +546,56 @@ final class KeyboardInjector {
     private func clampedPointToActiveDisplays(_ point: CGPoint) -> CGPoint {
         let bounds = activeDisplayBounds()
         guard bounds.isNull == false, bounds.isEmpty == false else { return point }
+        return clampedPoint(point, to: bounds)
+    }
 
+    private func clampedPoint(_ point: CGPoint, to bounds: CGRect) -> CGPoint {
         let minX = bounds.minX
         let maxX = bounds.maxX - 1
         let minY = bounds.minY
         let maxY = bounds.maxY - 1
-
         return CGPoint(
             x: min(max(point.x, minX), maxX),
             y: min(max(point.y, minY), maxY)
         )
     }
 
+    func setCapturedDisplayBounds(_ bounds: CGRect?) {
+        if let bounds, bounds.isNull == false, bounds.isEmpty == false {
+            pointerBoundsOverride = bounds
+        } else {
+            pointerBoundsOverride = nil
+        }
+        cachedDisplayBounds = .zero
+        cachedDisplayBoundsTimestamp = 0
+    }
+
+    /// Moves the pointer onto the display the phone is showing, in Quartz global coordinates.
+    func warpCursorIntoCapturedDisplayIfNeeded() {
+        guard permissionManager.isTrusted() else { return }
+        guard let bounds = pointerBoundsOverride, bounds.isNull == false, bounds.isEmpty == false else { return }
+        guard let event = CGEvent(source: nil) else { return }
+        if bounds.contains(event.location) { return }
+
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        guard let move = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .mouseMoved,
+            mouseCursorPosition: center,
+            mouseButton: .left
+        ) else {
+            return
+        }
+        move.post(tap: .cghidEventTap)
+        cachedDisplayBounds = .zero
+        cachedDisplayBoundsTimestamp = 0
+    }
+
     private func activeDisplayBounds() -> CGRect {
+        if let pointerBoundsOverride, pointerBoundsOverride.isNull == false, pointerBoundsOverride.isEmpty == false {
+            return pointerBoundsOverride
+        }
+
         let now = CFAbsoluteTimeGetCurrent()
         if now - cachedDisplayBoundsTimestamp < 1.0, cachedDisplayBounds.isEmpty == false {
             return cachedDisplayBounds

@@ -11,6 +11,9 @@ final class ScreenPreviewState: ObservableObject {
     @Published private(set) var sourceAspectRatio: CGFloat = 16.0 / 10.0
     @Published var statsLabel = "No frames yet"
     @Published var hostCaptureStatusLabel = "Host: unknown"
+    @Published var displays: [HostDisplayInfo] = []
+    @Published var selectedDisplayID: UInt32 = 0
+    @Published var virtualDisplayWhenHeadless = true
     @Published private(set) var followAnchor = UnitPoint.center
     @Published private(set) var previewGlowColor = Color(red: 0.22, green: 0.28, blue: 0.36)
     let displayBridge = SampleBufferDisplayBridge()
@@ -41,6 +44,7 @@ final class ScreenPreviewState: ObservableObject {
         frameTimestamps.removeAll()
         statsLabel = "No frames yet"
         hostCaptureStatusLabel = "Host: unknown"
+        displays = []
         followAnchor = .center
         smoothedFPS = nil
         displayedFPS = nil
@@ -85,6 +89,23 @@ final class ScreenPreviewState: ObservableObject {
         updateStatsLabel()
     }
 
+    func applyDisplayCatalog(_ message: RemoteMessage) {
+        if let displays = message.displays {
+            self.displays = displays
+        }
+        if let selectedDisplayID = message.selectedDisplayID {
+            self.selectedDisplayID = selectedDisplayID
+        }
+        if let virtualDisplayWhenHeadless = message.virtualDisplayWhenHeadless {
+            self.virtualDisplayWhenHeadless = virtualDisplayWhenHeadless
+        }
+        updateHostCaptureStatus(
+            routeLabel: message.capturedDisplayName ?? message.captureRoute,
+            displayCount: message.hostDisplayCount,
+            isActive: message.previewCaptureActive
+        )
+    }
+
     func updateHostCaptureStatus(routeLabel: String?, displayCount: Int?, isActive: Bool?) {
         let normalizedRoute: String
         if let routeLabel, routeLabel.isEmpty == false {
@@ -95,7 +116,7 @@ final class ScreenPreviewState: ObservableObject {
 
         let displaySummary: String
         if let displayCount {
-            displaySummary = "\(displayCount) display" + (displayCount == 1 ? "" : "s")
+            displaySummary = "\(displayCount) physical display" + (displayCount == 1 ? "" : "s")
         } else {
             displaySummary = "display count unknown"
         }
@@ -110,7 +131,7 @@ final class ScreenPreviewState: ObservableObject {
             activitySummary = "state unknown"
         }
 
-        hostCaptureStatusLabel = "Host: \(normalizedRoute) • \(displaySummary) • \(activitySummary)"
+        hostCaptureStatusLabel = "Showing \(normalizedRoute) • \(displaySummary) • \(activitySummary)"
     }
 
     func noteCaptureDidNotStart() {

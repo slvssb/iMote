@@ -28,9 +28,49 @@ public enum RemoteMessageType: String, Codable, Sendable {
     case permissionStatusRequest
     case permissionStatus
     case permissionAction
+    case displayControl
     case ping
     case pong
     case error
+}
+
+public enum HostDisplayKind: String, Codable, Sendable {
+    case physical
+    case builtin
+    case virtual
+}
+
+public struct HostDisplayInfo: Codable, Sendable, Equatable, Identifiable {
+    public var id: UInt32
+    public var name: String
+    public var width: Int
+    public var height: Int
+    public var kind: HostDisplayKind
+    public var isAsleep: Bool
+    public var isCaptured: Bool
+
+    public init(
+        id: UInt32,
+        name: String,
+        width: Int,
+        height: Int,
+        kind: HostDisplayKind,
+        isAsleep: Bool,
+        isCaptured: Bool
+    ) {
+        self.id = id
+        self.name = name
+        self.width = width
+        self.height = height
+        self.kind = kind
+        self.isAsleep = isAsleep
+        self.isCaptured = isCaptured
+    }
+
+    public var menuTitle: String {
+        let asleep = isAsleep ? ", asleep" : ""
+        return "\(name) · \(width)×\(height)\(asleep)"
+    }
 }
 
 public enum KeyAction: String, Codable, Sendable {
@@ -101,6 +141,12 @@ public struct RemoteMessage: Codable, Sendable {
     public var captureRoute: String?
     public var hostDisplayCount: Int?
     public var previewCaptureActive: Bool?
+    public var displays: [HostDisplayInfo]?
+    public var capturedDisplayID: UInt32?
+    public var capturedDisplayName: String?
+    public var selectedDisplayID: UInt32?
+    public var virtualDisplayWhenHeadless: Bool?
+    public var displayID: UInt32?
     public var audioSource: AudioCaptureSource?
     public var permissionAction: HostPermissionAction?
     public var accessibilityGranted: Bool?
@@ -137,6 +183,12 @@ public struct RemoteMessage: Codable, Sendable {
         captureRoute: String? = nil,
         hostDisplayCount: Int? = nil,
         previewCaptureActive: Bool? = nil,
+        displays: [HostDisplayInfo]? = nil,
+        capturedDisplayID: UInt32? = nil,
+        capturedDisplayName: String? = nil,
+        selectedDisplayID: UInt32? = nil,
+        virtualDisplayWhenHeadless: Bool? = nil,
+        displayID: UInt32? = nil,
         audioSource: AudioCaptureSource? = nil,
         permissionAction: HostPermissionAction? = nil,
         accessibilityGranted: Bool? = nil,
@@ -172,6 +224,12 @@ public struct RemoteMessage: Codable, Sendable {
         self.captureRoute = captureRoute
         self.hostDisplayCount = hostDisplayCount
         self.previewCaptureActive = previewCaptureActive
+        self.displays = displays
+        self.capturedDisplayID = capturedDisplayID
+        self.capturedDisplayName = capturedDisplayName
+        self.selectedDisplayID = selectedDisplayID
+        self.virtualDisplayWhenHeadless = virtualDisplayWhenHeadless
+        self.displayID = displayID
         self.audioSource = audioSource
         self.permissionAction = permissionAction
         self.accessibilityGranted = accessibilityGranted
@@ -303,14 +361,37 @@ public struct RemoteMessage: Codable, Sendable {
         thermalOverrideActive: Bool,
         captureRoute: String? = nil,
         hostDisplayCount: Int? = nil,
-        previewCaptureActive: Bool? = nil
+        previewCaptureActive: Bool? = nil,
+        displays: [HostDisplayInfo]? = nil,
+        capturedDisplayID: UInt32? = nil,
+        capturedDisplayName: String? = nil,
+        selectedDisplayID: UInt32? = nil,
+        virtualDisplayWhenHeadless: Bool? = nil
     ) -> RemoteMessage {
         RemoteMessage(
             type: .streamStatus,
             thermalOverrideActive: thermalOverrideActive,
             captureRoute: captureRoute,
             hostDisplayCount: hostDisplayCount,
-            previewCaptureActive: previewCaptureActive
+            previewCaptureActive: previewCaptureActive,
+            displays: displays,
+            capturedDisplayID: capturedDisplayID,
+            capturedDisplayName: capturedDisplayName,
+            selectedDisplayID: selectedDisplayID,
+            virtualDisplayWhenHeadless: virtualDisplayWhenHeadless
+        )
+    }
+
+    public static func displayControl(
+        displayID: UInt32?,
+        virtualDisplayWhenHeadless: Bool?,
+        token: String?
+    ) -> RemoteMessage {
+        RemoteMessage(
+            type: .displayControl,
+            token: token,
+            virtualDisplayWhenHeadless: virtualDisplayWhenHeadless,
+            displayID: displayID
         )
     }
 

@@ -28,6 +28,9 @@ final class MacAppState: ObservableObject {
     @Published var lastError: String?
     @Published var startOnLoginEnabled = false
     @Published var captureRouteStatus = "Unknown"
+    @Published var availableDisplays: [HostDisplayInfo] = []
+    @Published var selectedDisplayID: UInt32 = HostDisplayPreferences.selectedDisplayID
+    @Published var virtualDisplayWhenHeadless = HostDisplayPreferences.virtualDisplayWhenHeadless
     @Published var listenerPort: UInt16 = 8989
     @Published var isListenerRunning = false
     @Published var endpointSnapshot = HostEndpointCatalog.Snapshot.empty
@@ -223,6 +226,13 @@ final class MacAppState: ObservableObject {
             self?.captureRouteStatus = route
         }
 
+        server.onDisplayCatalogChange = { [weak self] snapshot in
+            self?.captureRouteStatus = snapshot.routeLabel
+            self?.availableDisplays = snapshot.displays
+            self?.selectedDisplayID = snapshot.selectedDisplayID
+            self?.virtualDisplayWhenHeadless = snapshot.virtualDisplayWhenHeadless
+        }
+
         server.onMediaStatusChange = { [weak self] status in
             self?.previewQualityMode = status.selectedQuality
             self?.effectiveQualityMode = status.effectiveQuality
@@ -236,6 +246,16 @@ final class MacAppState: ObservableObject {
             self?.lastPinnedFingerprintIsNew = isNew
             self?.refreshPairingSnapshot()
         }
+    }
+
+    func setVirtualDisplayWhenHeadless(_ enabled: Bool) {
+        virtualDisplayWhenHeadless = enabled
+        server.setVirtualDisplayWhenHeadless(enabled)
+    }
+
+    func selectDisplay(id: UInt32) {
+        selectedDisplayID = id
+        server.selectCaptureDisplay(id: id)
     }
 
     private func startPathMonitor() {

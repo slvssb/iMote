@@ -23,7 +23,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     var onAACConfig: ((Data) -> Void)?
     var onAACFrame: ((Data) -> Void)?
     var onThermalOverrideChanged: ((Bool) -> Void)?
-    var onHostCaptureStatusChanged: ((String?, Int?, Bool?) -> Void)?
+    var onHostCaptureStatusChanged: ((RemoteMessage) -> Void)?
     var onPermissionStatus: ((Bool, Bool) -> Void)?
     var onHostFingerprintPinned: ((String, Bool) -> Void)?
     var onTrustedEndpointsChanged: (() -> Void)?
@@ -175,6 +175,14 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         sendMessage(RemoteMessage.permissionAction(action, token: pairedToken))
     }
 
+    func sendDisplayControl(displayID: UInt32?, virtualDisplayWhenHeadless: Bool?) {
+        sendMessage(RemoteMessage.displayControl(
+            displayID: displayID,
+            virtualDisplayWhenHeadless: virtualDisplayWhenHeadless,
+            token: pairedToken
+        ))
+    }
+
     private func sendPairing(code: String) {
         let deviceName = UIDevice.current.name
         sendMessage(.pair(code: code, deviceName: deviceName, deviceID: deviceIdentifier))
@@ -306,7 +314,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             case .streamStatus:
                 guard hasCompletedSecureHandshake == false else { break }
                 onThermalOverrideChanged?(decoded.thermalOverrideActive ?? false)
-                onHostCaptureStatusChanged?(decoded.captureRoute, decoded.hostDisplayCount, decoded.previewCaptureActive)
+                onHostCaptureStatusChanged?(decoded)
             case .permissionStatus:
                 guard hasCompletedSecureHandshake == false else { break }
                 onPermissionStatus?(decoded.accessibilityGranted ?? false, decoded.screenRecordingGranted ?? false)
@@ -435,6 +443,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
              .permissionStatusRequest,
              .permissionAction,
              .trustControl,
+             .displayControl,
              .ping:
             return true
         default:
@@ -496,7 +505,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             break
         case .streamStatus:
             onThermalOverrideChanged?(decoded.thermalOverrideActive ?? false)
-            onHostCaptureStatusChanged?(decoded.captureRoute, decoded.hostDisplayCount, decoded.previewCaptureActive)
+            onHostCaptureStatusChanged?(decoded)
         case .permissionStatus:
             onPermissionStatus?(decoded.accessibilityGranted ?? false, decoded.screenRecordingGranted ?? false)
         default:

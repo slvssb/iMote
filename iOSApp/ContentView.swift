@@ -1271,6 +1271,51 @@ private struct MacCenteredLogoOverlay: View {
     private var previewControlsPanel: some View {
         VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
             VStack(alignment: .leading, spacing: 8) {
+                settingsTitle("Display", systemImage: "display")
+                Text(viewModel.screenPreview.hostCaptureStatusLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if viewModel.screenPreview.displays.count > 1 {
+                    Picker("Show display", selection: Binding(
+                        get: { viewModel.screenPreview.selectedDisplayID },
+                        set: { newValue in
+                            dismissTypingCapture()
+                            viewModel.selectHostDisplay(newValue)
+                        }
+                    )) {
+                        Text("Automatic").tag(UInt32(0))
+                        ForEach(viewModel.screenPreview.displays) { display in
+                            Text(display.menuTitle).tag(display.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(viewModel.isPaired == false)
+                }
+
+                Toggle(isOn: Binding(
+                    get: { viewModel.screenPreview.virtualDisplayWhenHeadless },
+                    set: { newValue in
+                        dismissTypingCapture()
+                        viewModel.setVirtualDisplayWhenHeadless(newValue)
+                    }
+                )) {
+                    Text("Virtual display when no monitor")
+                        .font(.footnote.weight(.semibold))
+                }
+                .disabled(viewModel.isPaired == false)
+
+                Text("Used when the Mac has no physical display online, so the preview and trackpad still have a screen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Layout.fieldHorizontalPadding)
+            .padding(.vertical, Layout.fieldVerticalPadding)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: Layout.fieldCornerRadius, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     settingsTitle("Zoom level", systemImage: "plus.magnifyingglass")
                     Text("\(previewZoomLevel, specifier: "%.1f")x")

@@ -23,10 +23,11 @@ actor MacScreenCaptureProvider {
 
     private var contentFilter: SCContentFilter?
     private var activeDisplayID: CGDirectDisplayID?
-    private var preferredPrimaryDisplayID: CGDirectDisplayID?
     private var sourceWidth: CGFloat = 0
     private var sourceHeight: CGFloat = 0
     private var displayFrame: CGRect = .zero
+    private var cgFrame: CGRect = .zero
+    private var appKitFrame: CGRect = .zero
     private var stream: SCStream?
     private var streamOutput: StreamOutput?
     private let outputQueue = DispatchQueue(label: "remote.keyboard.capture.output")
@@ -35,7 +36,13 @@ actor MacScreenCaptureProvider {
     private var audioCaptureSource: AudioCaptureSource = .off
     private var audioSampleHandler: ((CapturedAudioSampleBuffer, CapturedAudioOrigin) -> Void)?
     private var activeCaptureRouteLabel: String = "Unknown"
-    private var preferFallbackDisplay = false
+    private var activeSummaryLabel: String = "No display"
+    private var activeDisplayName: String = ""
+    private var activeDisplayKind: String = ""
+    private var virtualDisplayID: CGDirectDisplayID?
+    private var preferredDisplayID: CGDirectDisplayID = 0
+    private var preferredIdentity: DisplayHardwareIdentity?
+    private var needsRetarget = false
     private var captureEnabled = true
 
     func resumeCaptureForPairedClient() {
@@ -51,6 +58,11 @@ actor MacScreenCaptureProvider {
     func makeFramePixelBuffer(maxWidth: CGFloat = 1920) async -> CapturedPixelBuffer? {
         guard captureEnabled else { return nil }
         do {
+            if needsRetarget {
+                needsRetarget = false
+                contentFilter = nil
+                await stopStreamOnly()
+            }
             if contentFilter == nil {
                 try await prepareCaptureFilter()
             }
@@ -86,11 +98,33 @@ actor MacScreenCaptureProvider {
         self.streamOutput = nil
         self.activeDisplayID = nil
         self.activeCaptureRouteLabel = "Unknown"
+        self.activeSummaryLabel = "No display"
+        self.activeDisplayName = ""
+        self.activeDisplayKind = ""
         self.latestPixelBuffer = nil
         self.activeMaxWidth = 0
+        self.cgFrame = .zero
+        self.appKitFrame = .zero
+        self.displayFrame = .zero
+    }
+
+    private func stopStreamOnly() async {
+        if let stream {
+            try? await stream.stopCapture()
+            if let streamOutput {
+                try? stream.removeStreamOutput(streamOutput, type: .screen)
+                try? stream.removeStreamOutput(streamOutput, type: .audio)
+                try? stream.removeStreamOutput(streamOutput, type: .microphone)
+            }
+        }
+        self.stream = nil
+        self.streamOutput = nil
+        self.activeMaxWidth = 0
+        self.latestPixelBuffer = nil
     }
 
     func recoverAfterSystemWake(maxWidth: CGFloat = 1920) async -> Bool {
+        needsRetarget = false
         await stopCapture()
         contentFilter = nil
         sourceWidth = 0
@@ -123,46 +157,105 @@ actor MacScreenCaptureProvider {
     }
 
     func normalizedCursorPosition() async -> CGPoint? {
-        let frame = displayFrame
-        guard frame.isEmpty == false else { return nil }
+        guard appKitFrame.isEmpty == false, appKitFrame.width > 0, appKitFrame.height > 0 else { return nil }
 
+        // NSEvent is AppKit space (origin at the bottom-left of the main display, y up).
+        // The preview dot uses the top-left of the captured display, so y is flipped here.
+        let frame = appKitFrame
         let location = await MainActor.run { NSEvent.mouseLocation }
         let relativeX = (location.x - frame.minX) / frame.width
         let relativeY = (location.y - frame.minY) / frame.height
-
-        let clampedX = min(max(relativeX, 0), 1)
-        let clampedY = min(max(1 - relativeY, 0), 1)
-        return CGPoint(x: clampedX, y: clampedY)
+        return CGPoint(
+            x: min(max(relativeX, 0), 1),
+            y: min(max(1 - relativeY, 0), 1)
+        )
     }
 
     func currentCaptureRouteLabel() -> String {
         activeCaptureRouteLabel
     }
 
+    func currentCaptureSnapshot() -> CaptureTargetSnapshot? {
+        guard let activeDisplayID, sourceWidth > 0, sourceHeight > 0 else { return nil }
+        let asleep = CGDisplayIsAsleep(activeDisplayID) != 0
+        var label = activeSummaryLabel
+        if asleep, label.contains("asleep") == false {
+            label += " · asleep"
+        }
+        if asleep == false {
+            label = label.replacingOccurrences(of: " · asleep", with: "")
+        }
+        return CaptureTargetSnapshot(
+            displayID: activeDisplayID,
+            name: activeDisplayName,
+            kind: activeDisplayKind,
+            width: Int(sourceWidth),
+            height: Int(sourceHeight),
+            cgBounds: cgFrame,
+            summaryLabel: label,
+            isVirtual: activeDisplayKind == HostDisplayKind.virtual.rawValue,
+            isAsleep: asleep
+        )
+    }
+
+    func setSelectionPolicy(
+        virtualDisplayID: CGDirectDisplayID?,
+        preferredDisplayID: CGDirectDisplayID,
+        preferredIdentity: DisplayHardwareIdentity?
+    ) {
+        let changed = self.virtualDisplayID != virtualDisplayID
+            || self.preferredDisplayID != preferredDisplayID
+            || self.preferredIdentity != preferredIdentity
+        self.virtualDisplayID = virtualDisplayID
+        self.preferredDisplayID = preferredDisplayID
+        self.preferredIdentity = preferredIdentity
+        if changed {
+            needsRetarget = true
+        }
+    }
+
+    /// Older call sites used this to jump to a dummy plug while the main display slept.
+    /// Selection now prefers an awake physical display, then the virtual display, so a
+    /// caller only needs to force the next frame to look again.
     func setPreferFallbackDisplay(_ enabled: Bool) {
-        preferFallbackDisplay = enabled
+        _ = enabled
+        needsRetarget = true
+    }
+
+    fileprivate func noteStreamStopped() {
+        needsRetarget = true
     }
 
     private func prepareCaptureFilter() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = selectCaptureDisplay(from: content.displays) else {
             activeDisplayID = nil
-            activeCaptureRouteLabel = "Unknown"
+            activeCaptureRouteLabel = "No display"
+            activeSummaryLabel = "No display"
+            activeDisplayName = ""
+            activeDisplayKind = ""
+            sourceWidth = 0
+            sourceHeight = 0
+            displayFrame = .zero
+            cgFrame = .zero
+            appKitFrame = .zero
+            contentFilter = nil
             return
         }
 
         sourceWidth = CGFloat(display.width)
         sourceHeight = CGFloat(display.height)
-        displayFrame = display.frame
+        cgFrame = CGDisplayBounds(display.displayID)
+        appKitFrame = Self.appKitBounds(fromCG: cgFrame)
+        displayFrame = appKitFrame
         activeDisplayID = display.displayID
-        if preferFallbackDisplay == false {
-            // Remember the display we are actively mirroring while the real monitor path is healthy.
-            preferredPrimaryDisplayID = display.displayID
-        }
-        activeCaptureRouteLabel = resolveCaptureRouteLabel(
-            selectedDisplayID: display.displayID,
-            displayCount: content.displays.count
-        )
+        let kind = Self.kind(for: display.displayID, virtualDisplayID: virtualDisplayID)
+        activeDisplayKind = kind.rawValue
+        let name = await Self.localizedName(for: display.displayID, kind: kind)
+        activeDisplayName = name
+        let asleep = CGDisplayIsAsleep(display.displayID) != 0
+        activeSummaryLabel = Self.summaryLabel(name: name, width: display.width, height: display.height, isAsleep: asleep)
+        activeCaptureRouteLabel = activeSummaryLabel
         contentFilter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
     }
 
@@ -210,7 +303,7 @@ actor MacScreenCaptureProvider {
         }
 
         let streamOutput = StreamOutput(owner: self)
-        let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+        let stream = SCStream(filter: filter, configuration: config, delegate: streamOutput)
         try stream.addStreamOutput(streamOutput, type: .screen, sampleHandlerQueue: outputQueue)
         if config.capturesAudio {
             try stream.addStreamOutput(streamOutput, type: .audio, sampleHandlerQueue: outputQueue)
@@ -234,49 +327,107 @@ actor MacScreenCaptureProvider {
     }
 
     private func selectCaptureDisplay(from displays: [SCDisplay]) -> SCDisplay? {
-        guard displays.isEmpty == false else { return nil }
-
-        if preferFallbackDisplay {
-            if let preferredPrimaryDisplayID {
-                let fallbackDisplays = displays.filter { $0.displayID != preferredPrimaryDisplayID }
-                if let fallback = fallbackDisplays.max(by: { ($0.width * $0.height) < ($1.width * $1.height) }) {
-                    return fallback
-                }
-            }
-
-            return displays.max { lhs, rhs in
-                (lhs.width * lhs.height) < (rhs.width * rhs.height)
-            }
+        let candidates = displays.map { display in
+            CaptureDisplayCandidate(
+                id: display.displayID,
+                pixelCount: display.width * display.height,
+                isAsleep: CGDisplayIsAsleep(display.displayID) != 0,
+                isVirtual: Self.isVirtual(display.displayID, virtualDisplayID: virtualDisplayID),
+                isMain: display.displayID == CGMainDisplayID()
+            )
         }
-
-        if let preferredPrimaryDisplayID,
-           let preferredDisplay = displays.first(where: { $0.displayID == preferredPrimaryDisplayID }) {
-            return preferredDisplay
+        guard let chosen = CaptureDisplaySelection.choose(from: candidates, preferredID: resolvePreferredID(in: displays)),
+              let display = displays.first(where: { $0.displayID == chosen.id }) else {
+            return nil
         }
-
-        if let mainDisplay = displays.first(where: { $0.displayID == CGMainDisplayID() }) {
-            preferredPrimaryDisplayID = mainDisplay.displayID
-            return mainDisplay
-        }
-
-        return displays.max { lhs, rhs in
-            (lhs.width * lhs.height) < (rhs.width * rhs.height)
-        }
+        return display
     }
 
-    private func resolveCaptureRouteLabel(selectedDisplayID: CGDirectDisplayID, displayCount: Int) -> String {
-        if let preferredPrimaryDisplayID {
-            return selectedDisplayID == preferredPrimaryDisplayID ? "Real" : "Dummy/Fallback"
+    private func resolvePreferredID(in displays: [SCDisplay]) -> UInt32 {
+        guard preferredDisplayID != 0 else { return 0 }
+        if displays.contains(where: { $0.displayID == preferredDisplayID }) {
+            return preferredDisplayID
         }
+        guard let preferredIdentity, preferredIdentity.isSpecific else { return 0 }
+        let matches = displays.filter { Self.hardwareIdentity(for: $0.displayID) == preferredIdentity }
+        guard matches.count == 1, let match = matches.first else { return 0 }
+        return match.displayID
+    }
 
-        if displayCount > 1 {
-            return selectedDisplayID == CGMainDisplayID() ? "Real" : "Dummy/Fallback"
+    private static func isVirtual(_ id: CGDirectDisplayID, virtualDisplayID: CGDirectDisplayID?) -> Bool {
+        VirtualDisplayManager.isOurVirtualDisplay(id, knownID: virtualDisplayID)
+    }
+
+    private static func kind(for id: CGDirectDisplayID, virtualDisplayID: CGDirectDisplayID?) -> HostDisplayKind {
+        if isVirtual(id, virtualDisplayID: virtualDisplayID) {
+            return .virtual
         }
+        if CGDisplayIsBuiltin(id) != 0 {
+            return .builtin
+        }
+        return .physical
+    }
 
-        return "Real"
+    private static func hardwareIdentity(for id: CGDirectDisplayID) -> DisplayHardwareIdentity {
+        DisplayHardwareIdentity(
+            vendor: CGDisplayVendorNumber(id),
+            model: CGDisplayModelNumber(id),
+            serial: CGDisplaySerialNumber(id)
+        )
+    }
+
+    /// Quartz bounds put the origin at the top-left of the main display.
+    /// AppKit puts it at the bottom-left, with the same point size.
+    private static func appKitBounds(fromCG cgFrame: CGRect) -> CGRect {
+        let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
+        return CGRect(
+            x: cgFrame.origin.x,
+            y: primaryHeight - cgFrame.maxY,
+            width: cgFrame.width,
+            height: cgFrame.height
+        )
+    }
+
+    private static func summaryLabel(name: String, width: Int, height: Int, isAsleep: Bool) -> String {
+        let base = "\(name) · \(width)×\(height)"
+        return isAsleep ? "\(base) · asleep" : base
+    }
+
+    @MainActor
+    private static func localizedName(for displayID: CGDirectDisplayID, kind: HostDisplayKind) -> String {
+        for screen in NSScreen.screens {
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey(rawValue: "NSScreenNumber")] as? NSNumber else {
+                continue
+            }
+            guard number.uint32Value == displayID else { continue }
+            let name = screen.localizedName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty == false {
+                return kind == .virtual ? "Virtual display" : name
+            }
+        }
+        switch kind {
+        case .virtual:
+            return "Virtual display"
+        case .builtin:
+            return "Built-in display"
+        case .physical:
+            return "Display"
+        }
     }
 }
-private final class StreamOutput: NSObject, SCStreamOutput {
+
+struct CaptureTargetSnapshot: Equatable, Sendable {
+    var displayID: CGDirectDisplayID
+    var name: String
+    var kind: String
+    var width: Int
+    var height: Int
+    var cgBounds: CGRect
+    var summaryLabel: String
+    var isVirtual: Bool
+    var isAsleep: Bool
+}
+private final class StreamOutput: NSObject, SCStreamOutput, SCStreamDelegate {
     private weak var owner: MacScreenCaptureProvider?
 
     init(owner: MacScreenCaptureProvider) {
@@ -309,6 +460,13 @@ private final class StreamOutput: NSObject, SCStreamOutput {
             }
         @unknown default:
             return
+        }
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        guard let owner else { return }
+        Task {
+            await owner.noteStreamStopped()
         }
     }
 }

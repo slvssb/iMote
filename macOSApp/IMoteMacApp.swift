@@ -142,6 +142,7 @@ private final class MacHostCLIRunner: NSObject {
     private var lastStatus: String = ""
     private var lastRuntimeError: String = ""
     private var lastPinnedFingerprint: String = ""
+    private var lastCaptureRoute: String = ""
 
     init(appState: MacAppState) {
         self.appState = appState
@@ -237,6 +238,11 @@ private final class MacHostCLIRunner: NSObject {
             lastPinnedFingerprint = fingerprint
             let label = appState.lastPinnedFingerprintIsNew ? "New iPhone fingerprint" : "iPhone fingerprint"
             print("[iMote] \(label): \(fingerprint)")
+        }
+
+        if appState.captureRouteStatus != lastCaptureRoute {
+            lastCaptureRoute = appState.captureRouteStatus
+            print("[iMote] Capturing: \(appState.captureRouteStatus)")
         }
 
         if let error = appState.lastError, error.isEmpty == false, error != lastRuntimeError {

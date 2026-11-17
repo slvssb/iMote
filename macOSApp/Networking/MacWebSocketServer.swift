@@ -24,10 +24,19 @@ final class MacWebSocketServer: @unchecked Sendable {
         var thermalOverrideActive: Bool
     }
 
+    struct HostDisplayCatalogSnapshot: Sendable {
+        var routeLabel: String
+        var displays: [HostDisplayInfo]
+        var capturedDisplayID: CGDirectDisplayID
+        var selectedDisplayID: CGDirectDisplayID
+        var virtualDisplayWhenHeadless: Bool
+    }
+
     var onStateChange: ((String) -> Void)?
     var onClientsChange: (([ClientSnapshot]) -> Void)?
     var onRuntimeError: ((String) -> Void)?
     var onCaptureRouteChange: ((String) -> Void)?
+    var onDisplayCatalogChange: ((HostDisplayCatalogSnapshot) -> Void)?
     var onMediaStatusChange: ((MediaStatus) -> Void)?
     var onIdentityPinned: ((String, Bool) -> Void)?
 
@@ -62,6 +71,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     private let h264Encoder = H264FrameEncoder()
     private let aacEncoder = AACAudioEncoder()
     private let virtualDisplayManager = VirtualDisplayManager()
+    private let sessionPower = RemoteSessionPowerAssertion()
     private let queue = DispatchQueue(label: "remote.keyboard.mac.ws")
     private let queueSpecificKey = DispatchSpecificKey<Void>()
     private var thermalObserver: NSObjectProtocol?
@@ -106,6 +116,16 @@ final class MacWebSocketServer: @unchecked Sendable {
     private var recoveryBurstGeneration: UInt64 = 0
     private var lastPublishedCaptureRouteLabel: String = "Unknown"
     private var lastPublishedCaptureActive: Bool?
+    private var isListenerRunning = false
+    private var virtualDisplayWhenHeadless = HostDisplayPreferences.virtualDisplayWhenHeadless
+    private var preferredCaptureDisplayID = HostDisplayPreferences.selectedDisplayID
+    private var preferredCaptureIdentity = HostDisplayPreferences.selectedIdentity
+    private var cachedDisplayNames: [CGDirectDisplayID: String] = [:]
+    private var cachedDisplayRecords: [HostDisplayRecord] = []
+    private var lastPointerDisplayID: CGDirectDisplayID = 0
+    private var lastPointerBounds: CGRect = .zero
+    private var lastCaptureSummary: String = "Unknown"
+    private var lastDisplayWakeAttemptAt: Date?
 
     private enum BinaryPacketMarker {
         static let encryptedMedia: UInt8 = 0x7E
@@ -325,8 +345,11 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         listener = wsListener
+        isListenerRunning = true
         wsListener.start(queue: queue)
-        applyVirtualDisplayIfNeeded()
+        queue.async { [weak self] in
+            self?.syncHeadlessDisplay()
+        }
         startFrameBroadcasting()
     }
 
@@ -337,6 +360,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func stopOnQueue() {
+        isListenerRunning = false
         clients.values.forEach { context in
             context.connection.cancel()
         }
@@ -349,6 +373,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         suspendCaptureBecauseNoPhonesRemain()
         h264Encoder.stop()
         aacEncoder.stop()
+        sessionPower.setRemoteSessionActive(false)
         virtualDisplayManager.tearDown()
         publishClients()
     }
@@ -358,6 +383,31 @@ final class MacWebSocketServer: @unchecked Sendable {
             return try body()
         }
         return try queue.sync(execute: body)
+    }
+
+    func setVirtualDisplayWhenHeadless(_ enabled: Bool) {
+        onQueue {
+            guard self.isListenerRunning else { return }
+            self.virtualDisplayWhenHeadless = enabled
+            HostDisplayPreferences.save(virtualDisplayWhenHeadless: enabled)
+            self.syncHeadlessDisplay()
+            self.scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display setting change")
+            self.sendStreamStatusToAllPairedClients()
+        }
+    }
+
+    func selectCaptureDisplay(id: UInt32) {
+        onQueue {
+            guard self.isListenerRunning else { return }
+            self.preferredCaptureDisplayID = id
+            let identity = self.cachedDisplayRecords.first { $0.info.id == id }?.identity
+            self.preferredCaptureIdentity = identity?.isSpecific == true ? identity : nil
+            HostDisplayPreferences.saveSelection(displayID: id, identity: self.preferredCaptureIdentity)
+            self.pushCaptureSelectionPolicy()
+            self.scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display selection")
+            self.publishDisplayCatalog()
+            self.sendStreamStatusToAllPairedClients()
+        }
     }
 
     private func accept(_ connection: NWConnection) {
@@ -397,6 +447,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         if let removed = clients.removeValue(forKey: id) {
             pairingManager.revoke(token: removed.token)
         }
+        updateRemoteSessionPower()
         mediaRequests.removeValue(forKey: id)
         if mediaOwnerID == id {
             mediaOwnerID = clients.keys.first { mediaRequests[$0] != nil }
@@ -495,6 +546,8 @@ final class MacWebSocketServer: @unchecked Sendable {
             if isFromSecureChannel { handlePermissionAction(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .trustControl:
             if isFromSecureChannel { handleTrustControl(message, from: id) } else { send(.error("Secure channel required"), to: id) }
+        case .displayControl:
+            if isFromSecureChannel { handleDisplayControl(message, from: id) } else { send(.error("Secure channel required"), to: id) }
         case .ping:
             if clients[id]?.secureSession != nil, isFromSecureChannel == false {
                 return
@@ -563,10 +616,13 @@ final class MacWebSocketServer: @unchecked Sendable {
             context.secureSession = nil
             clients[id] = context
             send(.pairAck(success: true, token: token, reason: nil), to: id, deviceIDOverride: hostDeviceID)
+            updateRemoteSessionPower()
+            syncHeadlessDisplay()
             sendStreamStatus(to: id)
             sendPermissionStatus(to: id)
             publishClients()
             refreshCaptureForConnectedPhones()
+            scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after iPhone connected")
         } else {
             send(.pairAck(success: false, token: nil, reason: result.reason), to: id)
         }
@@ -887,6 +943,29 @@ final class MacWebSocketServer: @unchecked Sendable {
             }
             pairingManager.removeTrustedDevice(deviceID: session.clientDeviceID)
         }
+    }
+
+    private func handleDisplayControl(_ message: RemoteMessage, from id: UUID) {
+        let isAuthorized = authorize(id: id, token: message.token)
+        guard isAuthorized else {
+            send(.error("Unauthorized session token"), to: id)
+            return
+        }
+
+        if let enabled = message.virtualDisplayWhenHeadless {
+            virtualDisplayWhenHeadless = enabled
+            HostDisplayPreferences.save(virtualDisplayWhenHeadless: enabled)
+        }
+        if let displayID = message.displayID {
+            preferredCaptureDisplayID = displayID
+            let identity = cachedDisplayRecords.first { $0.info.id == displayID }?.identity
+            preferredCaptureIdentity = identity?.isSpecific == true ? identity : nil
+            HostDisplayPreferences.saveSelection(displayID: displayID, identity: preferredCaptureIdentity)
+        }
+
+        syncHeadlessDisplay()
+        scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display selection")
+        sendStreamStatus(to: id)
     }
 
     private func mediaRequestConflicts(
@@ -1212,12 +1291,11 @@ final class MacWebSocketServer: @unchecked Sendable {
             guard let self else { return }
             let framePixelBuffer = await self.screenCaptureProvider.makeFramePixelBuffer(maxWidth: self.previewCaptureMaxWidth)
             let cursorPosition = await self.screenCaptureProvider.normalizedCursorPosition()
-            let captureRouteLabel = await self.screenCaptureProvider.currentCaptureRouteLabel()
+            let snapshot = await self.screenCaptureProvider.currentCaptureSnapshot()
             self.queue.async { [weak self] in
                 guard let self else { return }
                 self.isFrameCaptureInFlight = false
-                let effectiveRouteLabel = self.virtualDisplayManager.isActive ? "Virtual" : captureRouteLabel
-                self.publishCaptureRouteIfNeeded(effectiveRouteLabel)
+                self.applyCaptureSnapshot(snapshot)
 
                 if let cursorPosition {
                     let cursorMessage = RemoteMessage.cursorPosition(
@@ -1235,6 +1313,12 @@ final class MacWebSocketServer: @unchecked Sendable {
                     self.updateAdaptiveBitrateIfNeeded()
                     if self.consecutiveFrameFailures % 30 == 0 {
                         self.reportError("Screen preview capture failed repeatedly. Confirm Screen Recording permission for the Mac app.")
+                    }
+                    if self.consecutiveFrameFailures == 15 || self.consecutiveFrameFailures % 60 == 0 {
+                        if self.isDisplaySleeping, self.clients.contains(where: { $0.value.token != nil }) {
+                            self.sessionPower.wakeDisplaysNow()
+                        }
+                        self.syncHeadlessDisplay()
                     }
                     if self.consecutiveFrameFailures >= 60 {
                         self.recoverCapturePipelineIfNeeded(stateMessage: "Recovered capture after frame loss")
@@ -1257,48 +1341,46 @@ final class MacWebSocketServer: @unchecked Sendable {
     private func handleSystemWillSleep() {
         isSystemSleeping = true
         isDisplaySleeping = true
-        Task { [weak self] in
-            await self?.screenCaptureProvider.setPreferFallbackDisplay(true)
-        }
         isFrameCaptureInFlight = false
         consecutiveFrameFailures = 0
         publishCaptureActivityIfNeeded()
     }
 
     private func handleSystemDidWake() {
+        guard isListenerRunning else { return }
         isSystemSleeping = false
         isDisplaySleeping = false
-        Task { [weak self] in
-            await self?.screenCaptureProvider.setPreferFallbackDisplay(false)
-        }
-        applyVirtualDisplayIfNeeded()
+        sessionPower.invalidate()
+        updateRemoteSessionPower()
+        syncHeadlessDisplay()
         publishCaptureActivityIfNeeded()
         scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after wake")
     }
 
     private func handleDisplaysDidSleep() {
+        guard isListenerRunning else { return }
         isDisplaySleeping = true
-        Task { [weak self] in
-            await self?.screenCaptureProvider.setPreferFallbackDisplay(true)
-        }
         isFrameCaptureInFlight = false
         consecutiveFrameFailures = 0
+        if clients.contains(where: { $0.value.token != nil }) {
+            sessionPower.wakeDisplaysNow()
+        }
+        syncHeadlessDisplay()
         publishCaptureActivityIfNeeded()
         scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display sleep")
     }
 
     private func handleDisplaysDidWake() {
+        guard isListenerRunning else { return }
         isDisplaySleeping = false
-        Task { [weak self] in
-            await self?.screenCaptureProvider.setPreferFallbackDisplay(false)
-        }
+        syncHeadlessDisplay()
         publishCaptureActivityIfNeeded()
         scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display wake")
     }
 
     private func handleScreenParametersDidChange() {
-        guard isSystemSleeping == false else { return }
-        applyVirtualDisplayIfNeeded()
+        guard isListenerRunning, isSystemSleeping == false else { return }
+        syncHeadlessDisplay()
         scheduleCaptureRecoveryBurst(stateMessage: "Recovered capture after display reconfiguration")
     }
 
@@ -1327,14 +1409,24 @@ final class MacWebSocketServer: @unchecked Sendable {
         lastCaptureRecoveryAttemptAt = Date()
 
         let maxWidth = previewCaptureMaxWidth
+        let virtualID = virtualDisplayManager.virtualDisplayID
+        let preferred = preferredCaptureDisplayID
+        let identity = preferredCaptureIdentity
         Task { [weak self] in
             guard let self else { return }
+            await self.screenCaptureProvider.setSelectionPolicy(
+                virtualDisplayID: virtualID,
+                preferredDisplayID: preferred,
+                preferredIdentity: identity
+            )
             let recovered = await self.screenCaptureProvider.recoverAfterSystemWake(maxWidth: maxWidth)
+            let snapshot = await self.screenCaptureProvider.currentCaptureSnapshot()
             self.queue.async { [weak self] in
                 guard let self else { return }
                 self.isWakeRecoveryInProgress = false
                 self.isFrameCaptureInFlight = false
                 self.consecutiveFrameFailures = 0
+                self.applyCaptureSnapshot(snapshot)
                 self.publishCaptureActivityIfNeeded()
 
                 if recovered {
@@ -1400,31 +1492,133 @@ final class MacWebSocketServer: @unchecked Sendable {
     }
 
     private func currentHostDisplayCount() -> Int {
-        let maxDisplays: UInt32 = 16
-        var displays = [CGDirectDisplayID](repeating: 0, count: Int(maxDisplays))
-        var count: UInt32 = 0
-        let result = CGGetOnlineDisplayList(maxDisplays, &displays, &count)
-        guard result == .success else { return 0 }
-        return Int(count)
+        virtualDisplayManager.physicalOnlineCount()
     }
 
-    private func applyVirtualDisplayIfNeeded() {
-        guard let event = virtualDisplayManager.ensureDisplayAvailable() else { return }
-        switch event {
-        case .created:
-            let displayID = virtualDisplayManager.virtualDisplayID.map { String($0) } ?? "?"
+    private func syncHeadlessDisplay() {
+        guard isListenerRunning else { return }
+        let result = virtualDisplayManager.syncWithPhysicalDisplays(enabled: virtualDisplayWhenHeadless)
+        switch result {
+        case .created(let displayID):
+            let idLabel = displayID == 0 ? "pending" : String(displayID)
             Task { @MainActor in
-                self.onStateChange?("Virtual display created (2560×1600) — headless mode [ID \(displayID)]")
+                self.onStateChange?("Virtual display created (2560×1600) — no physical display online [ID \(idLabel)]")
             }
         case .creationFailed:
             Task { @MainActor in
-                self.onStateChange?("Virtual display creation failed — headless capture unavailable")
+                self.onStateChange?("Virtual display unavailable. If the monitor drops the HDMI link, an HDMI dummy plug is the hardware fallback.")
             }
         case .tornDown:
             Task { @MainActor in
-                self.onStateChange?("Virtual display removed — physical display detected")
+                self.onStateChange?("Virtual display removed — physical display is online")
+            }
+        case .unchanged:
+            break
+        }
+        pushCaptureSelectionPolicy()
+        refreshDisplayCatalog()
+    }
+
+    private func pushCaptureSelectionPolicy() {
+        let virtualID = virtualDisplayManager.virtualDisplayID
+        let preferred = preferredCaptureDisplayID
+        let identity = preferredCaptureIdentity
+        Task { [weak self] in
+            await self?.screenCaptureProvider.setSelectionPolicy(
+                virtualDisplayID: virtualID,
+                preferredDisplayID: preferred,
+                preferredIdentity: identity
+            )
+        }
+    }
+
+    private func updateRemoteSessionPower() {
+        guard isListenerRunning else {
+            sessionPower.setRemoteSessionActive(false)
+            return
+        }
+        let paired = clients.contains { $0.value.token != nil }
+        sessionPower.setRemoteSessionActive(paired)
+        if paired {
+            sessionPower.wakeDisplaysNow()
+        }
+    }
+
+    private func applyCaptureSnapshot(_ snapshot: CaptureTargetSnapshot?) {
+        let label = snapshot?.summaryLabel ?? "No display"
+        lastCaptureSummary = label
+        if let snapshot {
+            isDisplaySleeping = snapshot.isAsleep
+            if snapshot.isAsleep, clients.contains(where: { $0.value.token != nil }) {
+                let now = Date()
+                if lastDisplayWakeAttemptAt == nil || now.timeIntervalSince(lastDisplayWakeAttemptAt ?? now) > 2 {
+                    lastDisplayWakeAttemptAt = now
+                    sessionPower.wakeDisplaysNow()
+                }
             }
         }
+        publishCaptureRouteIfNeeded(label)
+
+        guard let snapshot else {
+            if lastPointerDisplayID != 0 {
+                lastPointerDisplayID = 0
+                lastPointerBounds = .zero
+                injector.setCapturedDisplayBounds(nil)
+                publishDisplayCatalog()
+            }
+            return
+        }
+
+        let boundsChanged = snapshot.displayID != lastPointerDisplayID || snapshot.cgBounds.equalTo(lastPointerBounds) == false
+        guard boundsChanged else { return }
+        lastPointerDisplayID = snapshot.displayID
+        lastPointerBounds = snapshot.cgBounds
+        injector.setCapturedDisplayBounds(snapshot.cgBounds)
+        injector.warpCursorIntoCapturedDisplayIfNeeded()
+        publishDisplayCatalog()
+    }
+
+    private func refreshDisplayCatalog() {
+        Task { @MainActor in
+            let names = HostDisplayDirectory.localizedNames()
+            self.queue.async { [weak self] in
+                guard let self else { return }
+                self.cachedDisplayNames = names
+                self.publishDisplayCatalog()
+            }
+        }
+    }
+
+    private func publishDisplayCatalog() {
+        let records = HostDisplayDirectory.onlineRecords(
+            virtualDisplayID: virtualDisplayManager.virtualDisplayID,
+            names: cachedDisplayNames,
+            capturedID: lastPointerDisplayID == 0 ? nil : lastPointerDisplayID
+        )
+        cachedDisplayRecords = records
+        reconcilePreferredDisplay(with: records)
+        let snapshot = HostDisplayCatalogSnapshot(
+            routeLabel: lastCaptureSummary,
+            displays: cachedDisplayRecords.map(\.info),
+            capturedDisplayID: lastPointerDisplayID,
+            selectedDisplayID: preferredCaptureDisplayID,
+            virtualDisplayWhenHeadless: virtualDisplayWhenHeadless
+        )
+        Task { @MainActor in
+            self.onDisplayCatalogChange?(snapshot)
+        }
+        sendStreamStatusToAllPairedClients()
+    }
+
+    private func reconcilePreferredDisplay(with records: [HostDisplayRecord]) {
+        guard preferredCaptureDisplayID != 0 else { return }
+        if records.contains(where: { $0.info.id == preferredCaptureDisplayID }) { return }
+        guard let identity = preferredCaptureIdentity, identity.isSpecific else { return }
+        let matches = records.filter { $0.identity == identity }
+        guard matches.count == 1, let match = matches.first else { return }
+        preferredCaptureDisplayID = match.info.id
+        HostDisplayPreferences.saveSelection(displayID: match.info.id, identity: identity)
+        pushCaptureSelectionPolicy()
     }
 
     private func handleThermalStateChange(_ state: ProcessInfo.ThermalState) {
@@ -1553,7 +1747,12 @@ final class MacWebSocketServer: @unchecked Sendable {
                 thermalOverrideActive: isThermalOverrideActive,
                 captureRoute: lastPublishedCaptureRouteLabel,
                 hostDisplayCount: currentHostDisplayCount(),
-                previewCaptureActive: currentPreviewCaptureActive()
+                previewCaptureActive: currentPreviewCaptureActive(),
+                displays: cachedDisplayRecords.map(\.info),
+                capturedDisplayID: lastPointerDisplayID == 0 ? nil : lastPointerDisplayID,
+                capturedDisplayName: lastCaptureSummary,
+                selectedDisplayID: preferredCaptureDisplayID,
+                virtualDisplayWhenHeadless: virtualDisplayWhenHeadless
             ),
             to: id
         )
