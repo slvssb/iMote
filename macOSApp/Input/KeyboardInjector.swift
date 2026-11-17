@@ -49,12 +49,16 @@ final class KeyboardInjector {
         if permissionManager.isTrusted() == false {
             throw KeyboardInjectorError.accessibilityPermissionMissing
         }
-        let normalizedKey = mapper.normalizedKey(for: key)
-        guard let keyCode = mapper.keyCode(for: normalizedKey) else {
-            throw KeyboardInjectorError.keyNotMapped("\(key) (normalized: \(normalizedKey))")
+        guard let resolved = mapper.resolve(key: key, modifiers: modifiers) else {
+            if modifiers.isEmpty {
+                try injectUnicodeCharacter(key)
+                return
+            }
+            throw KeyboardInjectorError.keyNotMapped(key)
         }
 
-        let flags = mapper.eventFlags(for: modifiers)
+        let keyCode = resolved.keyCode
+        let flags = resolved.flags
         switch action {
         case .down:
             try postKeyEvent(keyCode: keyCode, keyDown: true, flags: flags)
@@ -421,6 +425,9 @@ final class KeyboardInjector {
 
         keyDown.keyboardSetUnicodeString(stringLength: scalars.count, unicodeString: scalars)
         keyUp.keyboardSetUnicodeString(stringLength: scalars.count, unicodeString: scalars)
+        // A virtual key of 0 is the ANSI A key. Some apps insert that character as well as the Unicode string.
+        keyDown.setIntegerValueField(.keyboardEventKeycode, value: 0xFF)
+        keyUp.setIntegerValueField(.keyboardEventKeycode, value: 0xFF)
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
     }

@@ -431,20 +431,24 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     func handleCharacter(_ character: Character) {
-        let value = String(character)
         let modifiers = Array(activeModifiers)
-
-        if modifiers.isEmpty {
-            if let shiftedBaseKey = shiftedBaseKey(for: character) {
-                client.sendKey(shiftedBaseKey, modifiers: [.shift], action: .tap)
-            } else {
-                client.sendText(value)
-            }
+        if character == " " {
+            client.sendKey(KeyboardNamedKey.space.rawValue, modifiers: modifiers, action: .tap)
             return
         }
 
-        let keyName = normalizeKeyCharacter(character)
-        client.sendKey(keyName, modifiers: modifiers, action: .tap)
+        let shortcutModifiers = modifiers.filter { $0 != .shift }
+        if shortcutModifiers.isEmpty == false, character.isLetter {
+            client.sendKey(String(character).lowercased(), modifiers: modifiers, action: .tap)
+            return
+        }
+
+        if modifiers.isEmpty, shouldSendAsUnicodeText(character) {
+            client.sendText(String(character))
+            return
+        }
+
+        client.sendKey(String(character), modifiers: modifiers, action: .tap)
     }
 
     func handleBackspace() {
@@ -601,27 +605,12 @@ final class IOSKeyboardViewModel: ObservableObject {
         permissionPollTask = nil
     }
 
-    private func shiftedBaseKey(for character: Character) -> String? {
-        let value = String(character)
-
-        if value.count == 1,
-           let scalar = value.unicodeScalars.first,
-           CharacterSet.uppercaseLetters.contains(scalar) {
-            return value.lowercased()
+    private func shouldSendAsUnicodeText(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first, character.unicodeScalars.count == 1 else {
+            return true
         }
-
-        let shiftedSymbolMap: [Character: String] = [
-            "~": "`", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
-            "_": "-", "+": "=", "{": "[", "}": "]", "|": "\\", ":": ";", "\"": "'", "<": ",", ">": ".", "?": "/"
-        ]
-
-        return shiftedSymbolMap[character]
-    }
-
-    private func normalizeKeyCharacter(_ character: Character) -> String {
-        if character == " " {
-            return KeyboardNamedKey.space.rawValue
-        }
-        return String(character).lowercased()
+        if CharacterSet.lowercaseLetters.contains(scalar) { return true }
+        if scalar.value < 0x20 || scalar.value > 0x7E { return true }
+        return false
     }
 }
