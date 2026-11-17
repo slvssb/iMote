@@ -128,7 +128,7 @@ Bonjour stays on the LAN. To connect from another network, both devices join a t
 1. Install Tailscale on the Mac and the iPhone and sign both into the same tailnet.
 2. Run iMote Host. Under Reachable, copy the Tailscale name (for example `macbook.tailnet.ts.net:8989`) or the `100.x` address. The local name and LAN address stay in that list for same-Wi-Fi use.
 3. On the iPhone, choose Remote, paste the host, and leave the port at `8989` unless you changed it. A pasted `host:port` is accepted. Enter the pairing code and tap Connect.
-4. The host is saved on the iPhone. Next time, pick it under Saved hosts. A trusted device can reconnect without a new code until trust is cleared.
+4. The host is saved on the iPhone. Next time, pick it under Saved hosts. A Mac whose signing key you have already verified can be opened again without a new code. That trust belongs to that Mac, and Forget is what clears it.
 5. Local discovery still finds the Mac when the iPhone is on its Wi-Fi.
 
 The iOS app allows cleartext `ws://` with `NSAllowsArbitraryLoads`, which is what lets a tailnet host work. Do not add `NSAllowsLocalNetworking` beside that key. On iOS 10 and later, adding it makes the system ignore `NSAllowsArbitraryLoads`, and cleartext connections to non-LAN hosts stop working.

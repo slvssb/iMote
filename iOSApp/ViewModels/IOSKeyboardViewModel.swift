@@ -83,11 +83,12 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     var isTrustedAutoReconnect: Bool {
-        hasTrustedSession && pairingCode.isEmpty
+        hasTrustedSessionLocally && pairingCode.isEmpty
     }
 
     var hasTrustedSessionLocally: Bool {
-        hasTrustedSession
+        _ = trustedEndpointStamp
+        return TrustedHostStore.isTrusted(endpointKeys: currentEndpointKeys())
     }
 
     var localSigningFingerprint: String {
@@ -113,14 +114,10 @@ final class IOSKeyboardViewModel: ObservableObject {
     private var permissionPollTask: Task<Void, Never>?
     private var hasSeenMissingRequiredPermissions = false
 
-    private let trustedSessionKey = "remoteKeyboard.trustedSession"
     private let connectionModeKey = "remoteKeyboard.connectionTargetMode"
     private let manualHostKey = "remoteKeyboard.manualHost"
     private let manualPortKey = "remoteKeyboard.manualPort"
-    private var hasTrustedSession: Bool {
-        get { UserDefaults.standard.bool(forKey: trustedSessionKey) }
-        set { UserDefaults.standard.set(newValue, forKey: trustedSessionKey) }
-    }
+    @Published private var trustedEndpointStamp = 0
 
     init() {
         let defaults = UserDefaults.standard
@@ -135,6 +132,11 @@ final class IOSKeyboardViewModel: ObservableObject {
             manualPortText = storedPort
         }
         savedHosts = SavedRemoteHostStore.load()
+        defaults.removeObject(forKey: "remoteKeyboard.trustedSession")
+
+        client.onTrustedEndpointsChanged = { [weak self] in
+            self?.trustedEndpointStamp += 1
+        }
 
         browser.$services
             .receive(on: RunLoop.main)
@@ -186,7 +188,6 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.isUserInitiatedDisconnecting = false
                     self.suppressExpectedDisconnectErrors = false
                     self.connectionLabel = "Paired and ready (E2E)"
-                    self.hasTrustedSession = true
                     self.client.sendStreamConfig(qualityMode: self.previewQualityMode, previewZoomLevel: self.previewZoomLevel)
                     self.client.sendAudioConfig(source: self.audioCaptureSource)
                     self.client.sendStreamResync()
@@ -207,12 +208,6 @@ final class IOSKeyboardViewModel: ObservableObject {
                     self.screenPreview.reset()
                     self.aacAudioPlayer.stop()
                     self.resetPermissionGate()
-                    if self.hasTrustedSession,
-                       self.pairingCode.isEmpty,
-                       reason.localizedCaseInsensitiveContains("invalid pairing code") {
-                        self.hasTrustedSession = false
-                        self.client.disconnect(userInitiated: true)
-                    }
                 }
             }
             .store(in: &cancellables)
@@ -354,10 +349,11 @@ final class IOSKeyboardViewModel: ObservableObject {
         isUserInitiatedDisconnecting = false
         suppressExpectedDisconnectErrors = false
 
+        let endpointKeys = currentEndpointKeys()
         let codeToUse: String
         if pairingCode.count == 6 {
             codeToUse = pairingCode
-        } else if pairingCode.isEmpty, hasTrustedSession {
+        } else if pairingCode.isEmpty, TrustedHostStore.isTrusted(endpointKeys: endpointKeys) {
             codeToUse = ""
         } else {
             lastError = "Pairing code must be 6 digits."
@@ -366,7 +362,23 @@ final class IOSKeyboardViewModel: ObservableObject {
 
         lastError = nil
         noteConnectionDraftChanged()
-        client.connect(host: host, port: port, pairingCode: codeToUse)
+        client.connect(host: host, port: port, pairingCode: codeToUse, trustedEndpointKeys: endpointKeys)
+    }
+
+    func currentEndpointKeys() -> [String] {
+        switch connectionTargetMode {
+        case .localDiscovery:
+            guard let selectedService else { return [] }
+            return [
+                TrustedHostStore.bonjourKey(name: selectedService.name, port: selectedService.port),
+                TrustedHostStore.endpointKey(host: selectedService.host, port: selectedService.port)
+            ]
+        case .manualAddress:
+            guard case let .success(address) = RemoteHostAddress.parse(hostField: manualHost, portField: manualPortText) else {
+                return []
+            }
+            return [TrustedHostStore.endpointKey(host: address.host, port: address.port)]
+        }
     }
 
     func selectSavedHost(_ host: SavedRemoteHost) {
@@ -526,21 +538,31 @@ final class IOSKeyboardViewModel: ObservableObject {
     }
 
     func forgetTrustedSessionOnPhone() {
-        hasTrustedSession = false
-        pairingCode = ""
-        client.clearTrustedHostPins()
-        pairedHostFingerprint = nil
-        pairedHostFingerprintIsNew = false
+        forgetStoredTrust(matching: currentEndpointKeys())
     }
 
     func forgetCurrentDeviceTrustOnMac() async -> Bool {
+        let endpointKeys = client.connectedEndpointKeys
         let sent = await client.sendForgetCurrentDeviceTrust()
-        if sent {
-            forgetTrustedSessionOnPhone()
-        } else if lastError == nil {
-            lastError = "Could not tell the Mac to forget this iPhone. Still connected."
+        guard sent else {
+            if lastError == nil {
+                lastError = "Could not tell the Mac to forget this iPhone. Still connected."
+            }
+            return false
         }
-        return sent
+        forgetStoredTrust(matching: endpointKeys)
+        return true
+    }
+
+    private func forgetStoredTrust(matching endpointKeys: [String]) {
+        let removed = TrustedHostStore.forgetHosts(matching: endpointKeys)
+        for signingKey in removed {
+            client.clearHostPins(matchingSigningKey: signingKey)
+        }
+        pairingCode = ""
+        pairedHostFingerprint = nil
+        pairedHostFingerprintIsNew = false
+        trustedEndpointStamp += 1
     }
 
     func refreshHostPermissionStatus() {
