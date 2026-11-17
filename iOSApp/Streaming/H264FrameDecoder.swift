@@ -192,10 +192,14 @@ final class H264FrameDecoder {
     private func markFrameDecodeStart(index: Int64) {
         decodeStateLock.lock()
         decodeStartByFrameIndex[index] = CFAbsoluteTimeGetCurrent()
+        if decodeStartByFrameIndex.count > 90 {
+            let oldestAllowed = index - 60
+            decodeStartByFrameIndex = decodeStartByFrameIndex.filter { $0.key >= oldestAllowed }
+        }
         decodeStateLock.unlock()
     }
 
-    private func clearFrameDecodeStart(index: Int64) {
+    fileprivate func clearFrameDecodeStart(index: Int64) {
         decodeStateLock.lock()
         decodeStartByFrameIndex.removeValue(forKey: index)
         decodeStateLock.unlock()
@@ -211,11 +215,16 @@ final class H264FrameDecoder {
 }
 
 private let decompressionOutputCallback: VTDecompressionOutputCallback = { refCon, _, status, _, imageBuffer, presentationTimeStamp, _ in
-    guard status == noErr,
-          let refCon,
-          let imageBuffer else {
-        return
+    guard let refCon else { return }
+    let decoder = Unmanaged<H264FrameDecoder>.fromOpaque(refCon).takeUnretainedValue()
+    let outputFrameIndex = presentationTimeStamp.isValid ? presentationTimeStamp.value : nil
+    var didEmit = false
+    defer {
+        if didEmit == false, let outputFrameIndex {
+            decoder.clearFrameDecodeStart(index: outputFrameIndex)
+        }
     }
+    guard status == noErr, let imageBuffer else { return }
 
     var formatDescription: CMVideoFormatDescription?
     let formatStatus = CMVideoFormatDescriptionCreateForImageBuffer(
@@ -264,8 +273,7 @@ private let decompressionOutputCallback: VTDecompressionOutputCallback = { refCo
         )
     }
 
-    let decoder = Unmanaged<H264FrameDecoder>.fromOpaque(refCon).takeUnretainedValue()
-    let outputFrameIndex = presentationTimeStamp.isValid ? presentationTimeStamp.value : nil
+    didEmit = true
     decoder.emitSampleBuffer(outputSampleBuffer, frameIndex: outputFrameIndex)
 }
 
