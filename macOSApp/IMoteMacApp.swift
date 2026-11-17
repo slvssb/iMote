@@ -2,8 +2,31 @@ import SwiftUI
 import AppKit
 import Foundation
 
+final class HostAppDelegate: NSObject, NSApplicationDelegate {
+    var suppressWindows = false
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if suppressWindows {
+            return false
+        }
+        sender.activate()
+        if flag == false {
+            for window in sender.windows where window.level == .normal {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+        return true
+    }
+}
+
 @main
 struct IMoteMacApp: App {
+    @NSApplicationDelegateAdaptor(HostAppDelegate.self) private var appDelegate
+
     private struct LaunchOptions {
         let cliMode: Bool
         let port: UInt16
@@ -54,6 +77,7 @@ struct IMoteMacApp: App {
             _appState = StateObject(wrappedValue: MacAppState())
             self.cliRunner = nil
         }
+        appDelegate.suppressWindows = options.cliMode
     }
 
     var body: some Scene {
@@ -66,16 +90,19 @@ struct IMoteMacApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Settings {
+        Window("iMote Host", id: "host-main") {
             if launchOptions.cliMode {
-                EmptyView()
+                Color.clear
+                    .frame(width: 1, height: 1)
             } else {
-                VStack {
-                    Text("iMote: control your Mac from your iPhone")
-                        .padding()
-                }
-                .frame(width: 320, height: 100)
+                HostMainWindow(appState: appState)
             }
+        }
+        .defaultLaunchBehavior(launchOptions.cliMode ? .suppressed : .presented)
+        .defaultSize(width: 760, height: 680)
+        .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(replacing: .newItem) {}
         }
     }
 }
@@ -125,6 +152,30 @@ private final class MacHostCLIRunner: NSObject {
         } catch {
             print("[iMote] Failed to start listener: \(error.localizedDescription)")
             terminate(code: 1)
+            return
+        }
+
+        printReachableEndpoints()
+    }
+
+    private func printReachableEndpoints() {
+        let snapshot = HostEndpointCatalog.snapshot(port: port)
+        if snapshot.endpoints.isEmpty {
+            print("[iMote] Reachable addresses: none")
+        } else {
+            print("[iMote] Reachable addresses:")
+            for endpoint in snapshot.endpoints {
+                let interfaceNote = endpoint.interfaceName.map { " (\($0))" } ?? ""
+                print("[iMote]   \(endpoint.title)  \(endpoint.pasteboardValue)\(interfaceNote)")
+            }
+        }
+        switch snapshot.tailscale {
+        case .online:
+            print("[iMote] Tailscale: available")
+        case .notRunning:
+            print("[iMote] Tailscale: installed, no tailnet address")
+        case .notDetected:
+            print("[iMote] Tailscale: not detected")
         }
     }
 
@@ -213,6 +264,8 @@ private final class MacHostCLIRunner: NSObject {
           --cli      Run host listener in terminal/headless mode
           --port     Listener port (default: 8989)
           --help     Print this help
+
+        Prints listener state, the pairing code, permissions, LAN and Tailscale addresses, and connected devices.
         """)
     }
 }

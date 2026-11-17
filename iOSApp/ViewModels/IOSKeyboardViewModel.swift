@@ -33,6 +33,7 @@ final class IOSKeyboardViewModel: ObservableObject {
     @Published var connectionTargetMode: ConnectionTargetMode = .localDiscovery
     @Published var manualHost = ""
     @Published var manualPortText = "8989"
+    @Published private(set) var savedHosts: [SavedRemoteHost] = []
     @Published var pairingCode = ""
     @Published var activeModifiers: Set<RemoteModifier> = []
     @Published var lastError: String?
@@ -107,12 +108,28 @@ final class IOSKeyboardViewModel: ObservableObject {
     private var hasSeenMissingRequiredPermissions = false
 
     private let trustedSessionKey = "remoteKeyboard.trustedSession"
+    private let connectionModeKey = "remoteKeyboard.connectionTargetMode"
+    private let manualHostKey = "remoteKeyboard.manualHost"
+    private let manualPortKey = "remoteKeyboard.manualPort"
     private var hasTrustedSession: Bool {
         get { UserDefaults.standard.bool(forKey: trustedSessionKey) }
         set { UserDefaults.standard.set(newValue, forKey: trustedSessionKey) }
     }
 
     init() {
+        let defaults = UserDefaults.standard
+        if let rawMode = defaults.string(forKey: connectionModeKey),
+           let mode = ConnectionTargetMode(rawValue: rawMode) {
+            connectionTargetMode = mode
+        }
+        if let storedHost = defaults.string(forKey: manualHostKey) {
+            manualHost = storedHost
+        }
+        if let storedPort = defaults.string(forKey: manualPortKey), storedPort.isEmpty == false {
+            manualPortText = storedPort
+        }
+        savedHosts = SavedRemoteHostStore.load()
+
         browser.$services
             .receive(on: RunLoop.main)
             .sink { [weak self] updated in
@@ -309,17 +326,17 @@ final class IOSKeyboardViewModel: ObservableObject {
             host = selectedService.host
             port = selectedService.port
         case .manualAddress:
-            let trimmedHost = manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmedHost.isEmpty == false else {
-                lastError = "Enter a remote host or IP address."
+            switch RemoteHostAddress.parse(hostField: manualHost, portField: manualPortText) {
+            case let .failure(failure):
+                lastError = failure.message
                 return
+            case let .success(address):
+                host = address.host
+                port = address.port
+                manualHost = address.host
+                manualPortText = String(address.port)
+                rememberRemoteHost(address)
             }
-            guard let parsedPort = Int(manualPortText), (1...65_535).contains(parsedPort) else {
-                lastError = "Port must be between 1 and 65535."
-                return
-            }
-            host = trimmedHost
-            port = parsedPort
         }
 
         isUserInitiatedDisconnecting = false
@@ -336,7 +353,46 @@ final class IOSKeyboardViewModel: ObservableObject {
         }
 
         lastError = nil
+        noteConnectionDraftChanged()
         client.connect(host: host, port: port, pairingCode: codeToUse)
+    }
+
+    func selectSavedHost(_ host: SavedRemoteHost) {
+        connectionTargetMode = .manualAddress
+        manualHost = host.host
+        manualPortText = String(host.port)
+        noteConnectionDraftChanged()
+    }
+
+    func forgetSavedHost(_ host: SavedRemoteHost) {
+        savedHosts.removeAll { $0.id == host.id }
+        SavedRemoteHostStore.save(savedHosts)
+    }
+
+    func noteConnectionDraftChanged() {
+        let defaults = UserDefaults.standard
+        defaults.set(connectionTargetMode.rawValue, forKey: connectionModeKey)
+        defaults.set(manualHost, forKey: manualHostKey)
+        defaults.set(manualPortText, forKey: manualPortKey)
+    }
+
+    private func rememberRemoteHost(_ address: RemoteHostAddress) {
+        var hosts = savedHosts
+        if let index = hosts.firstIndex(where: { existing in
+            existing.host.caseInsensitiveCompare(address.host) == .orderedSame && existing.port == address.port
+        }) {
+            hosts[index].host = address.host
+            hosts[index].port = address.port
+            hosts[index].lastUsedAt = Date()
+        } else {
+            hosts.append(SavedRemoteHost(id: UUID(), host: address.host, port: address.port, lastUsedAt: Date()))
+        }
+        hosts.sort { $0.lastUsedAt > $1.lastUsedAt }
+        if hosts.count > SavedRemoteHostStore.limit {
+            hosts = Array(hosts.prefix(SavedRemoteHostStore.limit))
+        }
+        savedHosts = hosts
+        SavedRemoteHostStore.save(hosts)
     }
 
     func disconnect() {

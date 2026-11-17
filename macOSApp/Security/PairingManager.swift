@@ -1,5 +1,21 @@
 import Foundation
 
+struct TrustedDeviceRecord: Identifiable, Equatable, Sendable {
+    var id: String
+    var name: String?
+
+    var displayName: String {
+        if let name {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty == false {
+                return trimmed
+            }
+        }
+        let suffix = id.prefix(8)
+        return suffix.isEmpty ? "iPhone" : "iPhone \(suffix)"
+    }
+}
+
 final class PairingManager {
     struct PairingResult {
         let success: Bool
@@ -14,8 +30,10 @@ final class PairingManager {
     private var activeTokens: [String: Date] = [:]
     private var trustedDeviceIDs: Set<String> = []
     private var trustedDeviceSigningKeys: [String: String] = [:]
+    private var trustedDeviceNames: [String: String] = [:]
     private let trustedDevicesKey = "remoteKeyboard.trustedDeviceIDs"
     private let trustedSigningKeysKey = "remoteKeyboard.trustedDeviceSigningKeys"
+    private let trustedDeviceNamesKey = "remoteKeyboard.trustedDeviceNames"
     private let lock = NSLock()
 
     init(codeValiditySeconds: TimeInterval = 60) {
@@ -92,10 +110,34 @@ final class PairingManager {
         }
     }
 
+    func trustedDevices() -> [TrustedDeviceRecord] {
+        withLock {
+            trustedDeviceIDs.map { id in
+                TrustedDeviceRecord(id: id, name: trustedDeviceNames[id])
+            }
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+        }
+    }
+
+    func noteTrustedDevice(deviceID: String, name: String?) {
+        withLock {
+            guard deviceID.isEmpty == false else { return }
+            let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard trimmed.isEmpty == false else { return }
+            guard trustedDeviceNames[deviceID] != trimmed else { return }
+            trustedDeviceNames[deviceID] = trimmed
+            persistTrustedDeviceNames()
+        }
+    }
+
     func clearTrustedDevices() {
         withLock {
             trustedDeviceIDs.removeAll()
+            trustedDeviceNames.removeAll()
             persistTrustedDevices()
+            persistTrustedDeviceNames()
         }
     }
 
@@ -103,8 +145,10 @@ final class PairingManager {
         withLock {
             trustedDeviceIDs.remove(deviceID)
             trustedDeviceSigningKeys.removeValue(forKey: deviceID)
+            trustedDeviceNames.removeValue(forKey: deviceID)
             persistTrustedDevices()
             persistTrustedSigningKeys()
+            persistTrustedDeviceNames()
         }
     }
 
@@ -136,6 +180,8 @@ final class PairingManager {
         let stored = UserDefaults.standard.stringArray(forKey: trustedDevicesKey) ?? []
         trustedDeviceIDs = Set(stored)
         trustedDeviceSigningKeys = UserDefaults.standard.dictionary(forKey: trustedSigningKeysKey) as? [String: String] ?? [:]
+        let storedNames = UserDefaults.standard.dictionary(forKey: trustedDeviceNamesKey) as? [String: String] ?? [:]
+        trustedDeviceNames = storedNames.filter { trustedDeviceIDs.contains($0.key) }
     }
 
     private func persistTrustedDevices() {
@@ -144,6 +190,10 @@ final class PairingManager {
 
     private func persistTrustedSigningKeys() {
         UserDefaults.standard.set(trustedDeviceSigningKeys, forKey: trustedSigningKeysKey)
+    }
+
+    private func persistTrustedDeviceNames() {
+        UserDefaults.standard.set(trustedDeviceNames, forKey: trustedDeviceNamesKey)
     }
 
     private static func makeCode() -> String {

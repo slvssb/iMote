@@ -26,7 +26,7 @@ targets:
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-        NSLocalNetworkUsageDescription: This app discovers and connects to your Mac keyboard server on local Wi-Fi.
+        NSLocalNetworkUsageDescription: iMote discovers your Mac on the local network and connects to Macs you save, including over Tailscale.
         NSBonjourServices:
           - _rkbd._tcp
         NSAppTransportSecurity:
@@ -47,7 +47,7 @@ targets:
       path: macOSApp/Info.plist
       properties:
         CFBundleDisplayName: iMote Host
-        LSUIElement: true
+        LSUIElement: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.slvssb.imote.host

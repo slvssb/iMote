@@ -24,6 +24,9 @@
 		3B321DF188E6DA67E424EA2C /* RemoteKeyboardProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */; };
 		445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 889865EECE778A1590EAFE31 /* IMoteMacApp.swift */; };
 		46D6A68727A71EEA2AD55B25 /* MenuBarMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD75AE3DD9183B8564B32359 /* MenuBarMenuView.swift */; };
+		C0DE6379HOSTENDPTCAT002 /* HostEndpointCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE6379HOSTENDPTCAT001 /* HostEndpointCatalog.swift */; };
+		C0DE6379HOSTMAINWINDOW02 /* HostMainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE6379HOSTMAINWINDOW01 /* HostMainWindow.swift */; };
+		C0DE6379REMOTEHOSTADDR02 /* RemoteHostAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE6379REMOTEHOSTADDR01 /* RemoteHostAddress.swift */; };
 		4A93D86DF6015B98A2392104 /* IOSKeyboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA105BD98FA3EEC61C2743EA /* IOSKeyboardViewModel.swift */; };
 		4E6BE1C50B306B72DF0503D5 /* BonjourServiceBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF2249F384A3961E513C070 /* BonjourServiceBrowser.swift */; };
 		52A766052B849140BB2B6021 /* MacAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7803AE636C3EA2E530381324 /* MacAppState.swift */; };
@@ -63,6 +66,9 @@
 		A1B2C3D4E5F6012345678903 /* iMote.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = iMote.icon; sourceTree = "<group>"; };
 		A30B15F95157EBCD2481742E /* IMoteiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMoteiOSApp.swift; sourceTree = "<group>"; };
 		A8D2320DA193126B225B7C01 /* RemoteKeyboardProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteKeyboardProtocol.swift; sourceTree = "<group>"; };
+		C0DE6379HOSTENDPTCAT001 /* HostEndpointCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostEndpointCatalog.swift; sourceTree = "<group>"; };
+		C0DE6379HOSTMAINWINDOW01 /* HostMainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostMainWindow.swift; sourceTree = "<group>"; };
+		C0DE6379REMOTEHOSTADDR01 /* RemoteHostAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHostAddress.swift; sourceTree = "<group>"; };
 		CBF2249F384A3961E513C070 /* BonjourServiceBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourServiceBrowser.swift; sourceTree = "<group>"; };
 		D1B5A789ADC802F2FFA34809 /* KeyboardInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInjector.swift; sourceTree = "<group>"; };
 		D1CA03D8B26AEEF394F1FADC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -78,6 +84,7 @@
 			isa = PBXGroup;
 			children = (
 				CBF2249F384A3961E513C070 /* BonjourServiceBrowser.swift */,
+				C0DE6379REMOTEHOSTADDR01 /* RemoteHostAddress.swift */,
 				4475252E2ACD2E5D3553A12B /* IOSWebSocketClient.swift */,
 			);
 			path = Networking;
@@ -222,6 +229,7 @@
 		B411F66D83EEAE2A6761C1BD /* Networking */ = {
 			isa = PBXGroup;
 			children = (
+				C0DE6379HOSTENDPTCAT001 /* HostEndpointCatalog.swift */,
 				3D8653253EC541A234D5C4AA /* MacWebSocketServer.swift */,
 			);
 			path = Networking;
@@ -230,6 +238,7 @@
 		C3ED65C905D65FA89562435A /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				C0DE6379HOSTMAINWINDOW01 /* HostMainWindow.swift */,
 				DD75AE3DD9183B8564B32359 /* MenuBarMenuView.swift */,
 			);
 			path = UI;
@@ -378,6 +387,8 @@
 				3413DDA12F81A0000086D1D8 /* VirtualDisplayManager.swift in Sources */,
 				BAB45B3ADCC83FC094122A83 /* MacWebSocketServer.swift in Sources */,
 				3413DD992F80E1890086D1D8 /* AACAudioEncoder.swift in Sources */,
+				C0DE6379HOSTENDPTCAT002 /* HostEndpointCatalog.swift in Sources */,
+				C0DE6379HOSTMAINWINDOW02 /* HostMainWindow.swift in Sources */,
 				46D6A68727A71EEA2AD55B25 /* MenuBarMenuView.swift in Sources */,
 				7B495C10B03F7C21BC7B604F /* PairingManager.swift in Sources */,
 				445C07A61D1EC7EB1CD08D99 /* IMoteMacApp.swift in Sources */,
@@ -389,6 +400,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C0DE6379REMOTEHOSTADDR02 /* RemoteHostAddress.swift in Sources */,
 				4E6BE1C50B306B72DF0503D5 /* BonjourServiceBrowser.swift in Sources */,
 				BBA2DCA4C6A595D6E5C748AC /* ContentView.swift in Sources */,
 				3413DD912F7F15F80086D1D8 /* H264FrameDecoder.swift in Sources */,
