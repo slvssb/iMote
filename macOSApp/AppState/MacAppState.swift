@@ -69,10 +69,10 @@ final class MacAppState: ObservableObject {
         }
         bindServerCallbacks()
         refreshAccessibility(prompt: false)
+        startPairingTicker()
+        refreshPairingSnapshot()
         if autoStart {
             startServer()
-            startPairingTicker()
-            refreshPairingSnapshot()
             startPathMonitor()
             refreshReachableEndpoints()
         }

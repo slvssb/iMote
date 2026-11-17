@@ -162,7 +162,7 @@ In CLI mode the host prints:
 Notes for CLI mode:
 
 - Accessibility and Screen Recording permissions still require GUI approval in System Settings.
-- `--cli` is intended for headless listener lifecycle, not bypassing macOS privacy prompts.
+- `--cli` is intended for headless listener lifecycle, not bypassing macOS privacy prompts. It uses the same listener as the window. The window stays hidden, and the pairing code in the terminal is the one the iPhone must enter.
 
 ## Notes
 
