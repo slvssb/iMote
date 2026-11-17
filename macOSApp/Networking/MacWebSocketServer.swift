@@ -313,6 +313,7 @@ final class MacWebSocketServer: @unchecked Sendable {
     func stop() {
         queue.async { [weak self] in
             guard let self else { return }
+            self.injector.releasePressedButtons()
             self.clients.values.forEach { context in
                 context.connection.cancel()
             }
@@ -357,6 +358,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         if let removed = clients.removeValue(forKey: id) {
             pairingManager.revoke(token: removed.token)
         }
+        injector.releasePressedButtons()
         publishClients()
         refreshCaptureForConnectedPhones()
     }

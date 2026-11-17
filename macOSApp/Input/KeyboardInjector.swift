@@ -204,6 +204,41 @@ final class KeyboardInjector {
         event.post(tap: .cghidEventTap)
     }
 
+    /// Posts a button-up for every button this process still considers down.
+    /// A phone that sleeps mid-drag, or a dropped `.up`, otherwise leaves the Mac dragging.
+    func releasePressedButtons() {
+        let buttons = pressedMouseButtons
+        pressedMouseButtons.removeAll()
+        guard buttons.isEmpty == false, permissionManager.isTrusted() else { return }
+        guard let eventSource = CGEventSource(stateID: .combinedSessionState),
+              let currentEvent = CGEvent(source: eventSource) else {
+            return
+        }
+        let cursor = currentEvent.location
+        for button in buttons {
+            let mappedButton: CGMouseButton
+            let upType: CGEventType
+            switch button {
+            case .left:
+                mappedButton = .left
+                upType = .leftMouseUp
+            case .right:
+                mappedButton = .right
+                upType = .rightMouseUp
+            case .center:
+                mappedButton = .center
+                upType = .otherMouseUp
+            }
+            try? postMouseEvent(
+                source: eventSource,
+                type: upType,
+                point: cursor,
+                button: mappedButton,
+                clickState: 1
+            )
+        }
+    }
+
     private func postKeyEvent(
         keyCode: CGKeyCode,
         keyDown: Bool,
