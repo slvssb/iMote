@@ -25,9 +25,7 @@ final class ScreenPreviewState: ObservableObject {
     private var timerCancellable: AnyCancellable?
     private var glowSampleCounter = 0
     private var smoothedGlowRGB: SIMD3<Double>?
-    private let ciContext = CIContext(options: [
-        .cacheIntermediates: false
-    ])
+    private let glowSampler = GlowSampler()
 
     init() {
         timerCancellable = Timer.publish(every: 1, on: .main, in: .common)
@@ -72,7 +70,7 @@ final class ScreenPreviewState: ObservableObject {
             if height > 0 {
                 sourceAspectRatio = width / height
             }
-            updatePreviewGlowColor(from: pixelBuffer)
+            scheduleGlowSample(from: pixelBuffer)
         }
         hasFrame = true
         displayBridge.enqueue(sampleBuffer)
@@ -177,43 +175,21 @@ final class ScreenPreviewState: ObservableObject {
         statsLabel = "~\(fps) fps • decode \(decodeMs) ms • render \(ageMs) ms"
     }
 
-    private func updatePreviewGlowColor(from pixelBuffer: CVPixelBuffer) {
+    private func scheduleGlowSample(from pixelBuffer: CVPixelBuffer) {
         glowSampleCounter += 1
         guard glowSampleCounter % 6 == 0 else { return }
-
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
-        let extent = image.extent
-        guard extent.isEmpty == false else { return }
-
-        // Sample a centered region to avoid unstable colors from edge UI chrome.
-        let sampleRect = extent.insetBy(dx: extent.width * 0.22, dy: extent.height * 0.28)
-        let filterInputExtent = CIVector(cgRect: sampleRect)
-        guard
-            let filter = CIFilter(name: "CIAreaAverage", parameters: [
-                kCIInputImageKey: image,
-                kCIInputExtentKey: filterInputExtent
-            ]),
-            let outputImage = filter.outputImage
-        else {
+        if let latency = smoothedDecodeLatencyMs, latency > 50 {
             return
         }
+        let wrapped = GlowPixelBuffer(value: pixelBuffer)
+        let sampler = glowSampler
+        Task.detached(priority: .utility) { [weak self] in
+            guard let sampled = sampler.averageColor(wrapped.value) else { return }
+            await self?.applyGlowSample(sampled)
+        }
+    }
 
-        var rgba = [UInt8](repeating: 0, count: 4)
-        ciContext.render(
-            outputImage,
-            toBitmap: &rgba,
-            rowBytes: 4,
-            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-            format: .RGBA8,
-            colorSpace: CGColorSpaceCreateDeviceRGB()
-        )
-
-        let sampled = SIMD3<Double>(
-            Double(rgba[0]) / 255.0,
-            Double(rgba[1]) / 255.0,
-            Double(rgba[2]) / 255.0
-        )
-
+    private func applyGlowSample(_ sampled: SIMD3<Double>) {
         let blendAlpha = 0.18
         let blended: SIMD3<Double>
         if let current = smoothedGlowRGB {
@@ -222,7 +198,6 @@ final class ScreenPreviewState: ObservableObject {
             blended = sampled
         }
         smoothedGlowRGB = blended
-
         previewGlowColor = Color(
             red: min(max(blended.x, 0), 1),
             green: min(max(blended.y, 0), 1),
@@ -304,5 +279,52 @@ final class SampleBufferDisplayBridge {
         stateLock.lock()
         defer { stateLock.unlock() }
         return displayLayers.allObjects
+    }
+}
+
+private struct GlowPixelBuffer: @unchecked Sendable {
+    let value: CVPixelBuffer
+}
+
+private final class GlowSampler: @unchecked Sendable {
+    private let context = CIContext(options: [
+        .cacheIntermediates: false
+    ])
+    private let lock = NSLock()
+
+    func averageColor(_ pixelBuffer: CVPixelBuffer) -> SIMD3<Double>? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let extent = image.extent
+        guard extent.isEmpty == false else { return nil }
+
+        let sampleRect = extent.insetBy(dx: extent.width * 0.22, dy: extent.height * 0.28)
+        let filterInputExtent = CIVector(cgRect: sampleRect)
+        guard
+            let filter = CIFilter(name: "CIAreaAverage", parameters: [
+                kCIInputImageKey: image,
+                kCIInputExtentKey: filterInputExtent
+            ]),
+            let outputImage = filter.outputImage
+        else {
+            return nil
+        }
+
+        var rgba = [UInt8](repeating: 0, count: 4)
+        context.render(
+            outputImage,
+            toBitmap: &rgba,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        return SIMD3(
+            Double(rgba[0]) / 255.0,
+            Double(rgba[1]) / 255.0,
+            Double(rgba[2]) / 255.0
+        )
     }
 }
