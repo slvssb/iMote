@@ -3,7 +3,6 @@ import AVFoundation
 import CoreImage
 import Foundation
 import SwiftUI
-import UIKit
 
 @MainActor
 final class ScreenPreviewState: ObservableObject {
@@ -50,17 +49,6 @@ final class ScreenPreviewState: ObservableObject {
         smoothedGlowRGB = nil
         previewGlowColor = Color(red: 0.22, green: 0.28, blue: 0.36)
         displayBridge.flush()
-    }
-
-    func consumeFrameData(_ data: Data) {
-        guard let image = UIImage(data: data) else { return }
-        consumeFrameImage(image)
-    }
-
-    func consumeFrameImage(_ image: UIImage) {
-        _ = image
-        hasFrame = true
-        recordArrival()
     }
 
     func consumeDecodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {

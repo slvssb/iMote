@@ -1578,16 +1578,6 @@ private struct MacCenteredLogoOverlay: View {
         }
     }
 
-    private var connectionBadgeText: String {
-        if viewModel.isPaired {
-            return "Paired"
-        }
-        if viewModel.isDisconnected {
-            return "Disconnected"
-        }
-        return "Connecting"
-    }
-
     private var selectedServiceBinding: Binding<DiscoveredService?> {
         Binding(
             get: { viewModel.selectedService },

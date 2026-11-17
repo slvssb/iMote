@@ -17,7 +17,6 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
     @Published private(set) var pairedToken: String?
 
     var onRemoteError: ((String) -> Void)?
-    var onScreenFrame: ((Data) -> Void)?
     var onCursorPosition: ((Double, Double) -> Void)?
     var onH264Config: ((Data) -> Void)?
     var onH264Frame: ((Data) -> Void)?
@@ -311,11 +310,6 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
                 handleIncomingSecureControl(decoded)
             case .e2eHelloAck:
                 handleSecureHelloAck(decoded)
-            case .screenFrame:
-                if let frameBase64 = decoded.frameBase64,
-                   let frameData = Data(base64Encoded: frameBase64) {
-                    onScreenFrame?(frameData)
-                }
             case .cursorPosition:
                 guard hasCompletedSecureHandshake == false else { break }
                 if let x = decoded.cursorX, let y = decoded.cursorY {
@@ -336,9 +330,6 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             return
         }
 
-        if isLikelyJPEG(data) {
-            onScreenFrame?(data)
-        }
     }
 
     private func handleBinaryVideoPacket(_ data: Data) -> Bool {
@@ -387,12 +378,6 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         default:
             return false
         }
-    }
-
-    private func isLikelyJPEG(_ data: Data) -> Bool {
-        guard data.count >= 4 else { return false }
-        let bytes = [UInt8](data.prefix(4))
-        return bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF
     }
 
     private func startPing() {
@@ -531,10 +516,6 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         default:
             break
         }
-    }
-
-    private static func makeControlChannelKey(from token: String) -> SymmetricKey {
-        SymmetricKey(data: Data(token.utf8))
     }
 
     private func startSecureHandshake(using token: String) {

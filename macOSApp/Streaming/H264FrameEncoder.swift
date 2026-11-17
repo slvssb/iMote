@@ -1,4 +1,3 @@
-import CoreGraphics
 import CoreMedia
 import CoreVideo
 import Foundation
@@ -75,14 +74,6 @@ final class H264FrameEncoder: @unchecked Sendable {
         return queuedFrameCount < maxQueuedFrames
     }
 
-    func encode(cgImage: CGImage) {
-        guard reserveFrameSlot() else { return }
-        queue.async {
-            self.encodeInternal(cgImage)
-            self.releaseFrameSlot()
-        }
-    }
-
     @discardableResult
     func encode(pixelBuffer: CVPixelBuffer) -> Bool {
         guard reserveFrameSlot() else { return false }
@@ -149,34 +140,6 @@ final class H264FrameEncoder: @unchecked Sendable {
             self.pendingConfigEmission = true
             self.forceNextKeyframe = true
         }
-    }
-
-    private func encodeInternal(_ cgImage: CGImage) {
-        let nextWidth = Int32(cgImage.width)
-        let nextHeight = Int32(cgImage.height)
-
-        if compressionSession == nil || nextWidth != width || nextHeight != height {
-            recreateSession(width: nextWidth, height: nextHeight)
-        }
-
-        guard let session = compressionSession,
-              let pixelBuffer = makePixelBuffer(from: cgImage) else {
-            return
-        }
-
-        let pts = CMTime(value: frameIndex, timescale: CMTimeScale(Self.targetFPS))
-        frameIndex += 1
-        let frameProperties = makeFrameProperties()
-
-        VTCompressionSessionEncodeFrame(
-            session,
-            imageBuffer: pixelBuffer,
-            presentationTimeStamp: pts,
-            duration: .invalid,
-            frameProperties: frameProperties,
-            sourceFrameRefcon: nil,
-            infoFlagsOut: nil
-        )
     }
 
     private func encodeInternal(_ pixelBuffer: CVPixelBuffer) {
@@ -272,55 +235,6 @@ final class H264FrameEncoder: @unchecked Sendable {
     private func applyBitrate(to session: VTCompressionSession, width: Int32, height: Int32) {
         let bitrate = targetBitrate(width: width, height: height, fps: Self.targetFPS)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFTypeRef)
-    }
-
-    private func makePixelBuffer(from cgImage: CGImage) -> CVPixelBuffer? {
-        let attrs: [CFString: Any] = [
-            kCVPixelBufferCGImageCompatibilityKey: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
-            kCVPixelBufferPixelFormatTypeKey: Int(kCVPixelFormatType_32BGRA),
-            kCVPixelBufferWidthKey: cgImage.width,
-            kCVPixelBufferHeightKey: cgImage.height
-        ]
-
-        var pixelBuffer: CVPixelBuffer?
-        let status = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            cgImage.width,
-            cgImage.height,
-            kCVPixelFormatType_32BGRA,
-            attrs as CFDictionary,
-            &pixelBuffer
-        )
-
-        guard status == kCVReturnSuccess, let pixelBuffer else {
-            return nil
-        }
-
-        CVPixelBufferLockBaseAddress(pixelBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
-
-        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
-            return nil
-        }
-
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-
-        guard let context = CGContext(
-            data: baseAddress,
-            width: cgImage.width,
-            height: cgImage.height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else {
-            return nil
-        }
-
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
-        return pixelBuffer
     }
 
     fileprivate func enqueueEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {

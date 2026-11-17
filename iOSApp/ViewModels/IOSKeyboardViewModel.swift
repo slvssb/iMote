@@ -255,11 +255,6 @@ final class IOSKeyboardViewModel: ObservableObject {
             self.aacAudioPlayer.enqueueFrame(framePayload)
         }
 
-        client.onScreenFrame = { [weak self] frameData in
-            guard let self else { return }
-            self.screenPreview.consumeFrameData(frameData)
-        }
-
         client.onCursorPosition = { [weak self] x, y in
             guard let self else { return }
             self.screenPreview.updateCursorPosition(x: x, y: y)
