@@ -235,7 +235,7 @@ final class KeyboardInjector {
         keyCode: CGKeyCode,
         keyDown: Bool,
         flags: CGEventFlags,
-        tap: CGEventTapLocation = .cgSessionEventTap
+        tap: CGEventTapLocation = .cghidEventTap
     ) throws {
         try postKeyEvent(
             keyCode: keyCode,
@@ -306,6 +306,17 @@ final class KeyboardInjector {
         let deviceLeftControl = CGEventFlags(rawValue: 0x00000001)
         let controlHeld: CGEventFlags = [.maskControl, .maskNonCoalesced, deviceLeftControl]
         let released: CGEventFlags = [.maskNonCoalesced]
+        var controlIsDown = false
+        defer {
+            if controlIsDown {
+                postControlRelease(
+                    source: source,
+                    controlKeyCode: controlKeyCode,
+                    keyboardType: kbdType,
+                    flags: released
+                )
+            }
+        }
 
         guard let clearFlags = CGEvent(keyboardEventSource: source, virtualKey: controlKeyCode, keyDown: false) else {
             throw KeyboardInjectorError.eventBuildFailed
@@ -314,7 +325,6 @@ final class KeyboardInjector {
         clearFlags.flags = released
         clearFlags.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
         clearFlags.post(tap: .cghidEventTap)
-        usleep(3000)
 
         guard let ctrlDown = CGEvent(keyboardEventSource: source, virtualKey: controlKeyCode, keyDown: true) else {
             throw KeyboardInjectorError.eventBuildFailed
@@ -323,7 +333,7 @@ final class KeyboardInjector {
         ctrlDown.flags = controlHeld
         ctrlDown.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
         ctrlDown.post(tap: .cghidEventTap)
-        usleep(2000)
+        controlIsDown = true
 
         guard let arrowDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true) else {
             throw KeyboardInjectorError.eventBuildFailed
@@ -331,7 +341,6 @@ final class KeyboardInjector {
         arrowDown.flags = controlHeld
         arrowDown.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
         arrowDown.post(tap: .cghidEventTap)
-        usleep(2000)
 
         guard let arrowUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
             throw KeyboardInjectorError.eventBuildFailed
@@ -339,14 +348,28 @@ final class KeyboardInjector {
         arrowUp.flags = controlHeld
         arrowUp.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
         arrowUp.post(tap: .cghidEventTap)
-        usleep(50000)
 
+        postControlRelease(
+            source: source,
+            controlKeyCode: controlKeyCode,
+            keyboardType: kbdType,
+            flags: released
+        )
+        controlIsDown = false
+    }
+
+    private func postControlRelease(
+        source: CGEventSource,
+        controlKeyCode: CGKeyCode,
+        keyboardType: Int64,
+        flags: CGEventFlags
+    ) {
         guard let ctrlUp = CGEvent(keyboardEventSource: source, virtualKey: controlKeyCode, keyDown: false) else {
-            throw KeyboardInjectorError.eventBuildFailed
+            return
         }
         ctrlUp.type = .flagsChanged
-        ctrlUp.flags = released
-        ctrlUp.setIntegerValueField(.keyboardEventKeyboardType, value: kbdType)
+        ctrlUp.flags = flags
+        ctrlUp.setIntegerValueField(.keyboardEventKeyboardType, value: keyboardType)
         ctrlUp.post(tap: .cghidEventTap)
     }
 
