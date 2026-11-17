@@ -19,7 +19,8 @@ This project (`iMote`) is software that lets an iPhone send input to a Mac host 
 
 ## Where Data Is Stored
 
-- Trusted device IDs are stored locally on the Mac host using local app storage.
+- Trusted device IDs and display names are stored locally on the Mac host using local app storage.
+- Saved remote hosts (a name or IP address, and a port) are stored locally on the iPhone.
 - Session tokens are short-lived in-memory/session data.
 - This project does not include a cloud backend by default.
 
@@ -37,7 +38,7 @@ The Mac host may request:
 
 ## Security and Network Notice
 
-- Current transport is designed for trusted LAN/VPN scenarios.
+- Current transport is designed for a trusted LAN or a tailnet you control, such as Tailscale. Tailscale encrypts that path. The app's pairing and encryption checks still apply.
 - Do not expose the host to untrusted/public networks without additional hardening (for example TLS, stronger auth, and network controls).
 
 ## Your Responsibilities

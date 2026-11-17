@@ -32,7 +32,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Eye cursor control uses the front camera to move the Mac pointer with your eye movement.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>This app discovers and connects to your Mac keyboard server on local Wi-Fi.</string>
+	<string>iMote discovers your Mac on the local network and connects to Macs you save, including over Tailscale.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

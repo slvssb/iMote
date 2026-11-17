@@ -11,12 +11,21 @@ final class MacWebSocketServer: @unchecked Sendable {
     struct ClientSnapshot: Sendable {
         let id: UUID
         let deviceName: String?
+        let isPaired: Bool
+    }
+
+    struct MediaStatus: Equatable, Sendable {
+        var selectedQuality: PreviewQualityMode
+        var effectiveQuality: PreviewQualityMode
+        var audioSource: AudioCaptureSource
+        var thermalOverrideActive: Bool
     }
 
     var onStateChange: ((String) -> Void)?
     var onClientsChange: (([ClientSnapshot]) -> Void)?
     var onRuntimeError: ((String) -> Void)?
     var onCaptureRouteChange: ((String) -> Void)?
+    var onMediaStatusChange: ((MediaStatus) -> Void)?
 
     private struct ClientContext {
         let id: UUID
@@ -245,6 +254,9 @@ final class MacWebSocketServer: @unchecked Sendable {
         wsOptions.autoReplyPing = true
         let parameters = NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
+        // Wildcard bind. Leaving requiredInterface unset accepts Wi-Fi, Ethernet,
+        // and Tailscale's utun interface. Bonjour advertisement stays local-only.
+        parameters.acceptLocalOnly = false
 
         let wsListener = try NWListener(using: parameters, on: listenPort)
         wsListener.service = NWListener.Service(name: Host.current().localizedName ?? "Mac Keyboard", type: "_rkbd._tcp")
@@ -254,7 +266,8 @@ final class MacWebSocketServer: @unchecked Sendable {
             let description: String
             switch state {
             case .ready:
-                description = "Listening on port \(port)"
+                description = "Listening on port \(port) (all interfaces)"
+                self.publishMediaStatus()
             case .failed(let error):
                 description = "Listener failed: \(error.localizedDescription)"
             case .cancelled:
@@ -439,6 +452,9 @@ final class MacWebSocketServer: @unchecked Sendable {
         let result = pairingManager.pair(code: submitted, deviceID: message.deviceID)
         guard var context = clients[id] else { return }
         if result.success, let token = result.token {
+            if let deviceID = message.deviceID, deviceID.isEmpty == false {
+                pairingManager.noteTrustedDevice(deviceID: deviceID, name: message.deviceName)
+            }
             context.token = token
             context.deviceName = message.deviceName
             context.secureSession = nil
@@ -627,6 +643,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             requestedPreviewZoomLevel = min(max(zoomLevel, 1.0), 3.0)
         }
         applyEffectiveQualityMode()
+        publishMediaStatus()
     }
 
     private func handleStreamResync(_ message: RemoteMessage, from id: UUID) {
@@ -653,6 +670,7 @@ final class MacWebSocketServer: @unchecked Sendable {
             await screenCaptureProvider.setAudioCaptureSource(source)
         }
         aacEncoder.requestStreamResync()
+        publishMediaStatus()
     }
 
     private func handlePermissionStatusRequest(_ message: RemoteMessage, from id: UUID) {
@@ -804,7 +822,7 @@ final class MacWebSocketServer: @unchecked Sendable {
 
     private func publishClients() {
         let snapshot = clients.values.map { context in
-            ClientSnapshot(id: context.id, deviceName: context.deviceName)
+            ClientSnapshot(id: context.id, deviceName: context.deviceName, isPaired: context.token != nil)
         }
         Task { @MainActor in
             self.onClientsChange?(snapshot)
@@ -1098,6 +1116,7 @@ final class MacWebSocketServer: @unchecked Sendable {
         }
 
         applyEffectiveQualityMode()
+        publishMediaStatus()
         sendStreamStatusToAllPairedClients()
     }
 
@@ -1137,6 +1156,18 @@ final class MacWebSocketServer: @unchecked Sendable {
             }
             guard hasPairedClients else { return }
             self.aacEncoder.encode(sampleBuffer: sampleBuffer.value)
+        }
+    }
+
+    private func publishMediaStatus() {
+        let status = MediaStatus(
+            selectedQuality: userSelectedQualityMode,
+            effectiveQuality: effectiveQualityMode,
+            audioSource: selectedAudioCaptureSource,
+            thermalOverrideActive: isThermalOverrideActive
+        )
+        Task { @MainActor in
+            self.onMediaStatusChange?(status)
         }
     }
 

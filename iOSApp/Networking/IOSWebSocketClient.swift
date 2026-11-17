@@ -74,7 +74,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
         lastPort = port
         lastPairCode = pairingCode
 
-        guard let url = URL(string: "ws://\(host):\(port)") else {
+        guard let url = RemoteHostAddress.webSocketURL(host: host, port: port) else {
             state = .failed("Invalid host/port")
             return
         }
