@@ -52,12 +52,21 @@ final class MacAppState: ObservableObject {
     )
 
     private var timerCancellable: AnyCancellable?
+    private static let listenerPortDefaultsKey = "remoteKeyboard.host.listenerPort"
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "imote.host.network-path")
     private var endpointRefreshTask: Task<Void, Never>?
     private var endpointRefreshGeneration = 0
 
-    init(autoStart: Bool = true) {
+    init(autoStart: Bool = true, initialPort: UInt16? = nil, rememberInitialPort: Bool = false) {
+        if let initialPort {
+            listenerPort = initialPort
+            if rememberInitialPort {
+                UserDefaults.standard.set(Int(initialPort), forKey: Self.listenerPortDefaultsKey)
+            }
+        } else {
+            listenerPort = Self.storedListenerPort()
+        }
         bindServerCallbacks()
         refreshAccessibility(prompt: false)
         if autoStart {
@@ -70,10 +79,43 @@ final class MacAppState: ObservableObject {
         refreshStartOnLoginStatus()
     }
 
-    func startServer(port: UInt16 = 8989) {
+    static func storedListenerPort() -> UInt16 {
+        let stored = UserDefaults.standard.integer(forKey: listenerPortDefaultsKey)
+        guard (1...65_535).contains(stored), let port = UInt16(exactly: stored) else {
+            return 8989
+        }
+        return port
+    }
+
+    static func parsePort(_ text: String) -> UInt16? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = UInt16(trimmed), value != 0 else { return nil }
+        return value
+    }
+
+    func applyListenerPort(_ text: String, startIfStopped: Bool) {
+        guard let port = Self.parsePort(text) else {
+            lastError = "Port must be between 1 and 65535."
+            return
+        }
+        lastError = nil
+        let changed = port != listenerPort
+        let wasRunning = isListenerRunning
         listenerPort = port
+        UserDefaults.standard.set(Int(port), forKey: Self.listenerPortDefaultsKey)
+        if wasRunning, changed {
+            stopServer()
+            startServer()
+        } else if wasRunning == false, startIfStopped {
+            startServer()
+        } else if wasRunning == false {
+            refreshReachableEndpoints()
+        }
+    }
+
+    func startServer() {
         do {
-            try server.start(port: port)
+            try server.start(port: listenerPort)
             isListenerRunning = true
             refreshReachableEndpoints()
         } catch {

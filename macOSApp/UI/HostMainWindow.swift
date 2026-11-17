@@ -13,7 +13,8 @@ struct HostMainWindow: View {
                     listenerPort: appState.listenerPort,
                     isListenerRunning: appState.isListenerRunning,
                     lastError: appState.lastError,
-                    onStart: { appState.startServer() },
+                    onStart: { appState.applyListenerPort($0, startIfStopped: true) },
+                    onApplyPort: { appState.applyListenerPort($0, startIfStopped: false) },
                     onStop: { appState.stopServer() }
                 )
                 HostPairingSection(
@@ -66,8 +67,31 @@ private struct HostListenerSection: View {
     let listenerPort: UInt16
     let isListenerRunning: Bool
     let lastError: String?
-    let onStart: () -> Void
+    let onStart: (String) -> Void
+    let onApplyPort: (String) -> Void
     let onStop: () -> Void
+    @State private var portText: String
+
+    init(
+        status: String,
+        captureRoute: String,
+        listenerPort: UInt16,
+        isListenerRunning: Bool,
+        lastError: String?,
+        onStart: @escaping (String) -> Void,
+        onApplyPort: @escaping (String) -> Void,
+        onStop: @escaping () -> Void
+    ) {
+        self.status = status
+        self.captureRoute = captureRoute
+        self.listenerPort = listenerPort
+        self.isListenerRunning = isListenerRunning
+        self.lastError = lastError
+        self.onStart = onStart
+        self.onApplyPort = onApplyPort
+        self.onStop = onStop
+        _portText = State(initialValue: String(listenerPort))
+    }
 
     var body: some View {
         Section {
@@ -77,19 +101,24 @@ private struct HostListenerSection: View {
                     .labelStyle(.titleAndIcon)
             }
             LabeledContent("Port") {
-                Text("\(listenerPort)")
-                    .monospacedDigit()
-                    .textSelection(.enabled)
+                TextField("8989", text: $portText)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 90)
+                    .onSubmit { onApplyPort(portText) }
             }
             LabeledContent("Capture") {
                 Text(captureRoute)
                     .foregroundStyle(.secondary)
             }
             HStack {
-                Button("Start Listener", action: onStart)
+                Button("Start Listener") { onStart(portText) }
                     .disabled(isListenerRunning)
+                Button("Apply Port") { onApplyPort(portText) }
                 Button("Stop Listener", action: onStop)
                     .disabled(isListenerRunning == false)
+            }
+            .onChange(of: listenerPort) { _, newValue in
+                portText = String(newValue)
             }
             if let lastError, lastError.isEmpty == false {
                 Text(lastError)
@@ -100,7 +129,7 @@ private struct HostListenerSection: View {
         } header: {
             Text("Status")
         } footer: {
-            Text("The listener accepts connections on every interface, including Tailscale when it is connected. Bonjour discovery stays on the local network.")
+            Text("The listener accepts connections on every interface, including Tailscale when it is connected. Bonjour discovery stays on the local network. Apply Port restarts the listener when it is already running.")
         }
     }
 }

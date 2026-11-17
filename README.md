@@ -147,7 +147,7 @@ You can run the mac host directly from terminal:
 CLI flags:
 
 - `--cli`: run listener headlessly in terminal
-- `--port <number>`: custom listener port (default `8989`)
+- `--port <number>`: listener port from 1 to 65535. A missing or non-numeric value exits instead of falling back to 8989. With no flag, the host uses the port last applied in the window, or 8989.
 - `--help`: print CLI usage
 
 In CLI mode the host prints:
@@ -166,7 +166,7 @@ Notes for CLI mode:
 
 ## Notes
 
-- Host listens on port `8989` on all interfaces, including Tailscale's interface when Tailscale is running, and advertises `_rkbd._tcp` on the local network only.
+- Host listens on port `8989` by default, on all interfaces, including Tailscale's interface when Tailscale is running, and advertises `_rkbd._tcp` on the local network only. The host window can change that port.
 - Shortcuts and capitals follow the Mac's current keyboard layout. Named keys such as Return and the arrows stay on fixed virtual keycodes.
 - Protocol version is 2. Update the iPhone and the Mac together. An older build stops with an update message instead of pairing.
 - iOS background execution is limited by platform policy.

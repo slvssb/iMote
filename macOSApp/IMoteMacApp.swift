@@ -29,13 +29,17 @@ struct IMoteMacApp: App {
 
     private struct LaunchOptions {
         let cliMode: Bool
-        let port: UInt16
+        let port: UInt16?
         let showHelp: Bool
 
-        static func parse(_ args: [String]) -> LaunchOptions {
+        struct ParseError: Error, CustomStringConvertible {
+            let description: String
+        }
+
+        static func parse(_ args: [String]) throws -> LaunchOptions {
             var cliMode = false
             var showHelp = false
-            var port: UInt16 = 8989
+            var port: UInt16?
 
             var index = 1
             while index < args.count {
@@ -46,10 +50,15 @@ struct IMoteMacApp: App {
                 case "--help", "-h":
                     showHelp = true
                 case "--port":
-                    if index + 1 < args.count, let value = UInt16(args[index + 1]) {
-                        port = value
-                        index += 1
+                    guard index + 1 < args.count else {
+                        throw ParseError(description: "--port needs a number from 1 to 65535.")
                     }
+                    let raw = args[index + 1]
+                    guard let value = UInt16(raw), value != 0 else {
+                        throw ParseError(description: "Invalid --port '\(raw)'. Use a number from 1 to 65535.")
+                    }
+                    port = value
+                    index += 1
                 default:
                     break
                 }
@@ -65,16 +74,31 @@ struct IMoteMacApp: App {
     private let cliRunner: MacHostCLIRunner?
 
     init() {
-        let options = LaunchOptions.parse(CommandLine.arguments)
+        let options: LaunchOptions
+        do {
+            options = try LaunchOptions.parse(CommandLine.arguments)
+        } catch {
+            let message = (error as? LaunchOptions.ParseError)?.description ?? error.localizedDescription
+            fputs("[iMote] \(message)\n", stderr)
+            fputs("[iMote] Run with --help for usage.\n", stderr)
+            exit(64)
+        }
         self.launchOptions = options
         if options.cliMode {
-            _appState = StateObject(wrappedValue: MacAppState(autoStart: false))
-            let runner = MacHostCLIRunner(port: options.port)
+            let cliPort = options.port ?? MacAppState.storedListenerPort()
+            _appState = StateObject(wrappedValue: MacAppState(autoStart: false, initialPort: cliPort))
+            let runner = MacHostCLIRunner(port: cliPort)
             self.cliRunner = runner
             runner.start(showHelp: options.showHelp)
             NSApplication.shared.setActivationPolicy(.prohibited)
         } else {
-            _appState = StateObject(wrappedValue: MacAppState())
+            _appState = StateObject(
+                wrappedValue: MacAppState(
+                    autoStart: true,
+                    initialPort: options.port,
+                    rememberInitialPort: options.port != nil
+                )
+            )
             self.cliRunner = nil
         }
         appDelegate.suppressWindows = options.cliMode
@@ -268,7 +292,7 @@ private final class MacHostCLIRunner: NSObject {
 
         Flags:
           --cli      Run host listener in terminal/headless mode
-          --port     Listener port (default: 8989)
+          --port     Listener port from 1 to 65535. Invalid values exit.
           --help     Print this help
 
         Prints listener state, the pairing code, permissions, LAN and Tailscale addresses, and connected devices.
