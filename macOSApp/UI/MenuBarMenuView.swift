@@ -11,19 +11,16 @@ struct MenuBarMenuView: View {
                 NSApp.activate()
                 openWindow(id: "host-main")
             }
+            .accessibilityHint("Opens Overview, Devices, and Settings")
             header
             Divider()
             addressSection
-            Divider()
-            displaySection
             Divider()
             pairingSection
             Divider()
             accessibilitySection
             Divider()
             connectionSection
-            Divider()
-            trustedDevicesSection
             Divider()
             startOnLoginSection
             Divider()
@@ -83,30 +80,7 @@ struct MenuBarMenuView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    private var displaySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Display")
-                .font(.subheadline.weight(.semibold))
-            Toggle("Virtual display when no monitor", isOn: Binding(
-                get: { appState.virtualDisplayWhenHeadless },
-                set: { appState.setVirtualDisplayWhenHeadless($0) }
-            ))
-            .font(.caption)
-            if appState.availableDisplays.count > 1 {
-                Picker("Show", selection: Binding(
-                    get: { appState.selectedDisplayID },
-                    set: { appState.selectDisplay(id: $0) }
-                )) {
-                    Text("Automatic").tag(UInt32(0))
-                    ForEach(appState.availableDisplays) { display in
-                        Text(display.menuTitle).tag(display.id)
-                    }
-                }
-                .font(.caption)
-            }
-        }
+        .accessibilityElement(children: .combine)
     }
 
     private var pairingSection: some View {
@@ -116,20 +90,31 @@ struct MenuBarMenuView: View {
             Text(appState.pairingCode)
                 .font(.system(size: 28, weight: .bold, design: .rounded))
                 .tracking(4)
+                .accessibilityLabel("Pairing code \(appState.pairingCode)")
             Text("Expires in \(appState.pairingSecondsRemaining)s")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Regenerate Code") {
                 appState.regeneratePairCode()
             }
+            if appState.hostFingerprint.isEmpty == false {
+                Text("This Mac \(appState.hostFingerprint)")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+            }
+            if let fingerprint = appState.lastPinnedFingerprint {
+                Text(appState.lastPinnedFingerprintIsNew ? "New iPhone \(fingerprint)" : "iPhone \(fingerprint)")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+            }
         }
     }
 
     private var accessibilitySection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Accessibility Permission")
+            Text("Permissions")
                 .font(.subheadline.weight(.semibold))
-            Text(appState.accessibilityGranted ? "Granted" : "Not granted")
+            Text(appState.accessibilityGranted ? "Accessibility: Granted" : "Accessibility: Not granted")
                 .font(.caption)
                 .foregroundStyle(appState.accessibilityGranted ? Color.green : Color.red)
             Text(appState.screenRecordingGranted ? "Screen Recording: Granted" : "Screen Recording: Not granted")
@@ -143,7 +128,7 @@ struct MenuBarMenuView: View {
 
     private var connectionSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Connected iPhones")
+            Text("iPhones")
                 .font(.subheadline.weight(.semibold))
             if appState.connectedPhones.isEmpty {
                 Text("No active client")
@@ -155,30 +140,18 @@ struct MenuBarMenuView: View {
                         .font(.caption)
                 }
             }
-        }
-    }
-
-    private var trustedDevicesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Trusted Devices")
-                .font(.subheadline.weight(.semibold))
             Text("\(appState.trustedDevices.count) trusted")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if appState.hostFingerprint.isEmpty == false {
-                Text("This Mac \(appState.hostFingerprint)")
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-            }
-            if let fingerprint = appState.lastPinnedFingerprint {
-                Text(appState.lastPinnedFingerprintIsNew ? "New iPhone \(fingerprint)" : "iPhone \(fingerprint)")
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-            }
-            Button("Clear trusted devices") {
-                appState.clearTrustedDevices()
-            }
         }
+    }
+
+    private var startOnLoginSection: some View {
+        Toggle("Start on Login", isOn: Binding(
+            get: { appState.startOnLoginEnabled },
+            set: { appState.setStartOnLoginEnabled($0) }
+        ))
+        .font(.subheadline.weight(.semibold))
     }
 
     private var controls: some View {
@@ -194,13 +167,5 @@ struct MenuBarMenuView: View {
                 NSApplication.shared.terminate(nil)
             }
         }
-    }
-
-    private var startOnLoginSection: some View {
-        Toggle("Start on Login", isOn: Binding(
-            get: { appState.startOnLoginEnabled },
-            set: { appState.setStartOnLoginEnabled($0) }
-        ))
-        .font(.subheadline.weight(.semibold))
     }
 }

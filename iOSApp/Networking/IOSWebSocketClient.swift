@@ -683,7 +683,8 @@ extension IOSWebSocketClient: URLSessionWebSocketDelegate {
 }
 
 enum TrustedHostStore {
-    struct Record: Codable, Equatable {
+    struct Record: Codable, Equatable, Identifiable {
+        var id: String { signingKey }
         var signingKey: String
         var endpoints: [String]
     }
@@ -735,6 +736,10 @@ enum TrustedHostStore {
         }
         save(records)
         return removed
+    }
+
+    static func snapshot() -> [Record] {
+        load()
     }
 
     static func removeAll() {

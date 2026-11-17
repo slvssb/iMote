@@ -541,8 +541,26 @@ final class IOSKeyboardViewModel: ObservableObject {
         screenPreview.displayBridge.flush()
     }
 
+    var trustedHostRecords: [TrustedHostStore.Record] {
+        _ = trustedEndpointStamp
+        return TrustedHostStore.snapshot()
+    }
+
     func forgetTrustedSessionOnPhone() {
         forgetStoredTrust(matching: currentEndpointKeys())
+    }
+
+    func forgetTrustedHost(endpointKeys: [String]) {
+        let activeEndpoints = Set(currentEndpointKeys() + client.connectedEndpointKeys)
+        if Set(endpointKeys).isDisjoint(with: activeEndpoints) {
+            let removed = TrustedHostStore.forgetHosts(matching: endpointKeys)
+            for signingKey in removed {
+                client.clearHostPins(matchingSigningKey: signingKey)
+            }
+            trustedEndpointStamp += 1
+        } else {
+            forgetStoredTrust(matching: endpointKeys)
+        }
     }
 
     func forgetCurrentDeviceTrustOnMac() async -> Bool {
