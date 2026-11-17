@@ -237,7 +237,7 @@ final class EyeCursorController: NSObject, ObservableObject, @unchecked Sendable
 
         let sensitivity: Double = 760
         let deltaX = Double(filteredX) * sensitivity
-        let deltaY = -Double(filteredY) * sensitivity
+        let deltaY = Double(filteredY) * sensitivity
 
         if abs(deltaX) + abs(deltaY) < 0.6 {
             return
