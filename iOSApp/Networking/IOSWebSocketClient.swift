@@ -505,7 +505,7 @@ final class IOSWebSocketClient: NSObject, ObservableObject {
             break
         case .streamStatus:
             onThermalOverrideChanged?(decoded.thermalOverrideActive ?? false)
-            onHostCaptureStatusChanged?(decoded.captureRoute, decoded.hostDisplayCount, decoded.previewCaptureActive)
+            onHostCaptureStatusChanged?(decoded)
         case .permissionStatus:
             onPermissionStatus?(decoded.accessibilityGranted ?? false, decoded.screenRecordingGranted ?? false)
         default:
